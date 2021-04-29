@@ -1,0 +1,21 @@
+version: 2
+updates:
+- package-ecosystem: maven
+  directory: "/"
+  schedule:
+    interval: daily
+    time: "04:00"
+  open-pull-requests-limit: 10
+  ignore:
+  - dependency-name: org.mockito:mockito-core
+    versions:
+    - 3.8.0
+  - dependency-name: org.apache.maven.plugins:maven-invoker-plugin
+    versions:
+    - 3.2.2
+  - dependency-name: org.apache.maven.shared:maven-common-artifact-filters
+    versions:
+    - 3.1.1
+  - dependency-name: org.beanshell:bsh
+    versions:
+    - 2.0b5
