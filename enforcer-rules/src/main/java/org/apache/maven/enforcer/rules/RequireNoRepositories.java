@@ -18,12 +18,8 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,14 +27,16 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.Repository;
+import org.apache.maven.api.services.xml.ModelXmlFactory;
+import org.apache.maven.api.settings.Profile;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.model.Model;
-import org.apache.maven.model.Repository;
-import org.apache.maven.project.MavenProject;
-import org.apache.maven.project.ProjectBuildingRequest;
-import org.apache.maven.settings.Profile;
-import org.apache.maven.settings.RepositoryBase;
+import org.apache.maven.enforcer.rules.utils.OriginalModels;
 
 /**
  * This rule checks that this pom or its parents don't define a repository.
@@ -92,11 +90,14 @@ public final class RequireNoRepositories extends AbstractStandardEnforcerRule {
      */
     private boolean allowSnapshotPluginRepositories = false;
 
-    private final MavenSession session;
+    private final Session session;
+
+    private final ModelXmlFactory modelXmlFactory;
 
     @Inject
-    public RequireNoRepositories(MavenSession session) {
+    public RequireNoRepositories(Session session, ModelXmlFactory modelXmlFactory) {
         this.session = Objects.requireNonNull(session);
+        this.modelXmlFactory = Objects.requireNonNull(modelXmlFactory);
     }
 
     public void setBanRepositories(boolean banRepositories) {
@@ -150,13 +151,13 @@ public final class RequireNoRepositories extends AbstractStandardEnforcerRule {
             allowedPluginRepositories.addAll(reposIdsFromSettings);
         }
 
-        List<MavenProject> sortedProjects = session.getProjectDependencyGraph().getSortedProjects();
+        List<Project> sortedProjects = session.getProjects();
 
         List<Model> models = new ArrayList<>();
-        for (MavenProject mavenProject : sortedProjects) {
+        for (Project mavenProject : sortedProjects) {
             getLog().debug("Scanning project: " + mavenProject.getGroupId() + ":" + mavenProject.getArtifactId()
                     + VERSION + mavenProject.getVersion());
-            models.add(mavenProject.getOriginalModel());
+            models.add(OriginalModels.read(modelXmlFactory, mavenProject));
         }
 
         List<Model> badModels = new ArrayList<>();
@@ -203,31 +204,19 @@ public final class RequireNoRepositories extends AbstractStandardEnforcerRule {
     }
 
     private Collection<String> getRepoIdsFromSettings(
-            Function<Profile, List<org.apache.maven.settings.Repository>> getRepositoriesFunc) {
+            Function<Profile, List<org.apache.maven.api.settings.Repository>> getRepositoriesFunc) {
 
-        List<String> activeProfileIds = Optional.ofNullable(session.getProjectBuildingRequest())
-                .map(ProjectBuildingRequest::getActiveProfileIds)
-                .orElse(Collections.emptyList());
-
-        List<String> inactiveProfileIds = Optional.ofNullable(session.getProjectBuildingRequest())
-                .map(ProjectBuildingRequest::getInactiveProfileIds)
-                .orElse(Collections.emptyList());
+        // the profiles activated on the command line are not available in the API, only the ones from settings.xml
+        List<String> activeProfileIds = session.getSettings().getActiveProfiles();
 
         return session.getSettings().getProfiles().stream()
                 .filter(p -> activeProfileIds.contains(p.getId()))
-                .filter(p -> !inactiveProfileIds.contains(p.getId()))
                 .map(getRepositoriesFunc)
                 .flatMap(Collection::stream)
-                .map(RepositoryBase::getId)
+                .map(org.apache.maven.api.settings.Repository::getId)
                 .collect(Collectors.toSet());
     }
 
-    /**
-     * @param repos          all repositories, never {@code null}
-     * @param allowedRepos   allowed repositories, never {@code null}
-     * @param allowSnapshots
-     * @return List of banned repositoreis.
-     */
     private static List<String> findBannedRepositories(
             List<Repository> repos, List<String> allowedRepos, boolean allowSnapshots) {
         List<String> bannedRepos = new ArrayList<>(allowedRepos.size());

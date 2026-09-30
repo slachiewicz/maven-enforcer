@@ -18,14 +18,13 @@
  */
 package org.apache.maven.enforcer.rules.checksum;
 
-import javax.inject.Named;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 
 import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.maven.api.di.Named;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleError;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.AbstractStandardEnforcerRule;

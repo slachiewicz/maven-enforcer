@@ -18,9 +18,6 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -29,10 +26,12 @@ import java.util.Map.Entry;
 import java.util.Objects;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Dependency;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.model.Dependency;
-import org.apache.maven.project.MavenProject;
 
 /**
  * This rule will check if a multi-module build will follow the best practices.
@@ -46,17 +45,17 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
 
     private boolean ignoreModuleDependencies = false;
 
-    private final MavenSession session;
+    private final Session session;
 
     @Inject
-    public ReactorModuleConvergence(MavenSession session) {
+    public ReactorModuleConvergence(Session session) {
         this.session = Objects.requireNonNull(session);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
 
-        List<MavenProject> sortedProjects = session.getProjectDependencyGraph().getSortedProjects();
+        List<Project> sortedProjects = session.getProjects();
         if (sortedProjects != null && !sortedProjects.isEmpty()) {
             checkReactor(sortedProjects);
             checkParentsInReactor(sortedProjects);
@@ -68,12 +67,12 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
         }
     }
 
-    private void checkParentsPartOfTheReactor(List<MavenProject> sortedProjects) throws EnforcerRuleException {
-        List<MavenProject> parentsWhichAreNotPartOfTheReactor = existParentsWhichAreNotPartOfTheReactor(sortedProjects);
+    private void checkParentsPartOfTheReactor(List<Project> sortedProjects) throws EnforcerRuleException {
+        List<Project> parentsWhichAreNotPartOfTheReactor = existParentsWhichAreNotPartOfTheReactor(sortedProjects);
         if (!parentsWhichAreNotPartOfTheReactor.isEmpty()) {
             StringBuilder sb = new StringBuilder().append(System.lineSeparator());
             addMessageIfExist(sb);
-            for (MavenProject mavenProject : parentsWhichAreNotPartOfTheReactor) {
+            for (Project mavenProject : parentsWhichAreNotPartOfTheReactor) {
                 sb.append(MODULE_TEXT);
                 sb.append(mavenProject.getId());
                 sb.append(System.lineSeparator());
@@ -89,12 +88,12 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * @param sortedProjects The list of reactor projects.
      * @throws EnforcerRuleException In case of a violation.
      */
-    private void checkMissingParentsInReactor(List<MavenProject> sortedProjects) throws EnforcerRuleException {
-        List<MavenProject> modulesWithoutParentsInReactor = existModulesWithoutParentsInReactor(sortedProjects);
+    private void checkMissingParentsInReactor(List<Project> sortedProjects) throws EnforcerRuleException {
+        List<Project> modulesWithoutParentsInReactor = existModulesWithoutParentsInReactor(sortedProjects);
         if (!modulesWithoutParentsInReactor.isEmpty()) {
             StringBuilder sb = new StringBuilder().append(System.lineSeparator());
             addMessageIfExist(sb);
-            for (MavenProject mavenProject : modulesWithoutParentsInReactor) {
+            for (Project mavenProject : modulesWithoutParentsInReactor) {
                 sb.append(MODULE_TEXT);
                 sb.append(mavenProject.getId());
                 sb.append(System.lineSeparator());
@@ -103,18 +102,17 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
         }
     }
 
-    private void checkDependenciesWithinReactor(List<MavenProject> sortedProjects) throws EnforcerRuleException {
+    private void checkDependenciesWithinReactor(List<Project> sortedProjects) throws EnforcerRuleException {
         // After we are sure having consistent version we can simply use the first one?
         String reactorVersion = sortedProjects.get(0).getVersion();
 
-        Map<MavenProject, List<Dependency>> areThereDependenciesWhichAreNotPartOfTheReactor =
+        Map<Project, List<Dependency>> areThereDependenciesWhichAreNotPartOfTheReactor =
                 areThereDependenciesWhichAreNotPartOfTheReactor(reactorVersion, sortedProjects);
         if (!areThereDependenciesWhichAreNotPartOfTheReactor.isEmpty()) {
             StringBuilder sb = new StringBuilder().append(System.lineSeparator());
             addMessageIfExist(sb);
             // CHECKSTYLE_OFF: LineLength
-            for (Entry<MavenProject, List<Dependency>> item :
-                    areThereDependenciesWhichAreNotPartOfTheReactor.entrySet()) {
+            for (Entry<Project, List<Dependency>> item : areThereDependenciesWhichAreNotPartOfTheReactor.entrySet()) {
                 sb.append(MODULE_TEXT);
                 sb.append(item.getKey().getId());
                 sb.append(System.lineSeparator());
@@ -138,19 +136,19 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * @param sortedProjects The list of reactor projects.
      * @throws EnforcerRuleException In case of a violation.
      */
-    private void checkParentsInReactor(List<MavenProject> sortedProjects) throws EnforcerRuleException {
+    private void checkParentsInReactor(List<Project> sortedProjects) throws EnforcerRuleException {
         // After we are sure having consistent version we can simply use the first one?
         String reactorVersion = sortedProjects.get(0).getVersion();
 
-        List<MavenProject> areParentsFromTheReactor = areParentsFromTheReactor(reactorVersion, sortedProjects);
+        List<Project> areParentsFromTheReactor = areParentsFromTheReactor(reactorVersion, sortedProjects);
         if (!areParentsFromTheReactor.isEmpty()) {
             StringBuilder sb = new StringBuilder().append(System.lineSeparator());
             addMessageIfExist(sb);
-            for (MavenProject mavenProject : areParentsFromTheReactor) {
+            for (Project mavenProject : areParentsFromTheReactor) {
                 sb.append(" --> ");
                 sb.append(mavenProject.getId());
                 sb.append(" parent:");
-                sb.append(mavenProject.getParent().getId());
+                sb.append(mavenProject.getParent().get().getId());
                 sb.append(System.lineSeparator());
             }
             throw new EnforcerRuleException("Reactor modules have parents which contain a wrong version." + sb);
@@ -163,12 +161,12 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * @param sortedProjects The list of reactor projects.
      * @throws EnforcerRuleException In case of a violation.
      */
-    private void checkReactor(List<MavenProject> sortedProjects) throws EnforcerRuleException {
-        List<MavenProject> consistenceCheckResult = isReactorVersionConsistent(sortedProjects);
+    private void checkReactor(List<Project> sortedProjects) throws EnforcerRuleException {
+        List<Project> consistenceCheckResult = isReactorVersionConsistent(sortedProjects);
         if (!consistenceCheckResult.isEmpty()) {
             StringBuilder sb = new StringBuilder().append(System.lineSeparator());
             addMessageIfExist(sb);
-            for (MavenProject mavenProject : consistenceCheckResult) {
+            for (Project mavenProject : consistenceCheckResult) {
                 sb.append(" --> ");
                 sb.append(mavenProject.getId());
                 sb.append(System.lineSeparator());
@@ -177,14 +175,14 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
         }
     }
 
-    private List<MavenProject> areParentsFromTheReactor(String reactorVersion, List<MavenProject> sortedProjects) {
-        List<MavenProject> result = new ArrayList<>();
+    private List<Project> areParentsFromTheReactor(String reactorVersion, List<Project> sortedProjects) {
+        List<Project> result = new ArrayList<>();
 
-        for (MavenProject mavenProject : sortedProjects) {
+        for (Project mavenProject : sortedProjects) {
             getLog().debug("Project: " + mavenProject.getId());
             if (hasParent(mavenProject)) {
-                if (!mavenProject.isExecutionRoot()) {
-                    MavenProject parent = mavenProject.getParent();
+                if (!mavenProject.isTopProject()) {
+                    Project parent = mavenProject.getParent().get();
                     if (!reactorVersion.equals(parent.getVersion())) {
                         getLog().debug("The project: " + mavenProject.getId()
                                 + " has a parent which version does not match the other elements in reactor");
@@ -199,14 +197,14 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
         return result;
     }
 
-    private List<MavenProject> existParentsWhichAreNotPartOfTheReactor(List<MavenProject> sortedProjects) {
-        List<MavenProject> result = new ArrayList<>();
+    private List<Project> existParentsWhichAreNotPartOfTheReactor(List<Project> sortedProjects) {
+        List<Project> result = new ArrayList<>();
 
-        for (MavenProject mavenProject : sortedProjects) {
+        for (Project mavenProject : sortedProjects) {
             getLog().debug("Project: " + mavenProject.getId());
             if (hasParent(mavenProject)) {
-                if (!mavenProject.isExecutionRoot()) {
-                    MavenProject parent = mavenProject.getParent();
+                if (!mavenProject.isTopProject()) {
+                    Project parent = mavenProject.getParent().get();
                     if (!isProjectPartOfTheReactor(parent, sortedProjects)) {
                         result.add(mavenProject);
                     }
@@ -225,11 +223,11 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * @param sortedProjects The list of existing projects.
      * @return true if the project has been found within the list false otherwise.
      */
-    private boolean isProjectPartOfTheReactor(MavenProject project, List<MavenProject> sortedProjects) {
+    private boolean isProjectPartOfTheReactor(Project project, List<Project> sortedProjects) {
         return isGAPartOfTheReactor(project.getGroupId(), project.getArtifactId(), sortedProjects);
     }
 
-    private boolean isDependencyPartOfTheReactor(Dependency dependency, List<MavenProject> sortedProjects) {
+    private boolean isDependencyPartOfTheReactor(Dependency dependency, List<Project> sortedProjects) {
         return isGAPartOfTheReactor(dependency.getGroupId(), dependency.getArtifactId(), sortedProjects);
     }
 
@@ -241,9 +239,9 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * @param sortedProjects The list of projects within the reactor.
      * @return true if the groupId/artifactId is part of the reactor false otherwise.
      */
-    private boolean isGAPartOfTheReactor(String groupId, String artifactId, List<MavenProject> sortedProjects) {
+    private boolean isGAPartOfTheReactor(String groupId, String artifactId, List<Project> sortedProjects) {
         boolean result = false;
-        for (MavenProject mavenProject : sortedProjects) {
+        for (Project mavenProject : sortedProjects) {
             String parentId = groupId + ":" + artifactId;
             String projectId = mavenProject.getGroupId() + ":" + mavenProject.getArtifactId();
             if (parentId.equals(projectId)) {
@@ -261,14 +259,14 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * @return The resulting list will contain the modules in the reactor which do not have a parent. The list will
      *         never null. If the list is empty no violation have happened.
      */
-    private List<MavenProject> existModulesWithoutParentsInReactor(List<MavenProject> sortedProjects) {
-        List<MavenProject> result = new ArrayList<>();
+    private List<Project> existModulesWithoutParentsInReactor(List<Project> sortedProjects) {
+        List<Project> result = new ArrayList<>();
 
-        for (MavenProject mavenProject : sortedProjects) {
+        for (Project mavenProject : sortedProjects) {
             getLog().debug("Project: " + mavenProject.getId());
             if (!hasParent(mavenProject)) {
                 // TODO: Should add an option to force having a parent?
-                if (mavenProject.isExecutionRoot()) {
+                if (mavenProject.isTopProject()) {
                     getLog().debug("The root does not need having a parent.");
                 } else {
                     getLog().debug("The module: " + mavenProject.getId() + " has no parent.");
@@ -284,10 +282,10 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * Convenience method to handle adding a dependency to the Map of List.
      *
      * @param result     The result List which should be handled.
-     * @param project    The MavenProject which will be added.
+     * @param project    The Project which will be added.
      * @param dependency The dependency which will be added.
      */
-    private void addDep(Map<MavenProject, List<Dependency>> result, MavenProject project, Dependency dependency) {
+    private void addDep(Map<Project, List<Dependency>> result, Project project, Dependency dependency) {
         if (result.containsKey(project)) {
             List<Dependency> list = result.get(project);
             if (list == null) {
@@ -312,15 +310,15 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * @return map of violations. Never null. If the map is empty, then no violation has happened.
      */
     // CHECKSTYLE_OFF: LineLength
-    private Map<MavenProject, List<Dependency>> areThereDependenciesWhichAreNotPartOfTheReactor(
-            String reactorVersion, List<MavenProject> sortedProjects)
+    private Map<Project, List<Dependency>> areThereDependenciesWhichAreNotPartOfTheReactor(
+            String reactorVersion, List<Project> sortedProjects)
                 // CHECKSTYLE_ON: LineLength
             {
-        Map<MavenProject, List<Dependency>> result = new HashMap<>();
-        for (MavenProject mavenProject : sortedProjects) {
+        Map<Project, List<Dependency>> result = new HashMap<>();
+        for (Project mavenProject : sortedProjects) {
             getLog().debug("Project: " + mavenProject.getId());
 
-            List<Dependency> dependencies = mavenProject.getDependencies();
+            List<Dependency> dependencies = mavenProject.getModel().getDependencies();
             if (hasDependencies(dependencies)) {
                 for (Dependency dependency : dependencies) {
                     getLog().debug(" -> Dep:" + dependency.getGroupId() + ":" + dependency.getArtifactId() + ":"
@@ -352,13 +350,13 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * @return The resulting list will contain the modules in the reactor which do the thing in the example above. The
      *         list will never null. If the list is empty no violation have happened.
      */
-    private List<MavenProject> isReactorVersionConsistent(List<MavenProject> projectList) {
-        List<MavenProject> result = new ArrayList<>();
+    private List<Project> isReactorVersionConsistent(List<Project> projectList) {
+        List<Project> result = new ArrayList<>();
 
         if (projectList != null && !projectList.isEmpty()) {
             String version = projectList.get(0).getVersion();
             getLog().debug("First version:" + version);
-            for (MavenProject mavenProject : projectList) {
+            for (Project mavenProject : projectList) {
                 getLog().debug(" -> checking " + mavenProject.getId());
                 if (!version.equals(mavenProject.getVersion())) {
                     result.add(mavenProject);
@@ -372,8 +370,8 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
         return dependencies != null && !dependencies.isEmpty();
     }
 
-    private boolean hasParent(MavenProject mavenProject) {
-        return mavenProject.getParent() != null;
+    private boolean hasParent(Project mavenProject) {
+        return mavenProject.getParent().isPresent();
     }
 
     public boolean isIgnoreModuleDependencies() {
@@ -386,7 +384,7 @@ public final class ReactorModuleConvergence extends AbstractStandardEnforcerRule
      * @param sb The already initialized exception message part.
      */
     private void addMessageIfExist(StringBuilder sb) {
-        if (!StringUtils.isEmpty(getMessage())) {
+        if (StringUtils.isNotEmpty(getMessage())) {
             sb.append(getMessage());
             sb.append(System.lineSeparator());
         }

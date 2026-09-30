@@ -18,14 +18,12 @@
  */
 package org.apache.maven.enforcer.rules.property;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.Objects;
 
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.ExpressionEvaluator;
-import org.codehaus.plexus.component.configurator.expression.ExpressionEvaluationException;
 
 /**
  * This rule checks that certain properties are set.
@@ -55,7 +53,7 @@ public final class RequireProperty extends AbstractPropertyEnforcerRule {
     public Object resolveValue() throws EnforcerRuleException {
         try {
             return evaluator.evaluate("${" + property + "}");
-        } catch (ExpressionEvaluationException e) {
+        } catch (IllegalStateException e) {
             throw new EnforcerRuleException(e);
         }
     }

@@ -18,19 +18,17 @@
  */
 package org.apache.maven.enforcer.rules.dependency;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Objects;
 import java.util.function.Predicate;
 
-import org.apache.maven.artifact.Artifact;
+import org.apache.maven.api.Artifact;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Parent;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.ArtifactUtils;
-import org.apache.maven.execution.MavenSession;
-
-import static java.util.Optional.ofNullable;
 
 /**
  * This rule checks that no snapshots are included.
@@ -53,9 +51,12 @@ public final class RequireReleaseDeps extends BannedDependenciesBase {
     private Predicate<Artifact> shouldExclude;
     private Predicate<Artifact> shouldInclude;
 
+    private final Project project;
+
     @Inject
-    public RequireReleaseDeps(MavenSession session, ResolverUtil resolverUtil) {
-        super(session, resolverUtil);
+    public RequireReleaseDeps(Project project, ResolverUtil resolverUtil, VersionParser versionParser) {
+        super(resolverUtil, versionParser);
+        this.project = Objects.requireNonNull(project);
     }
 
     // Override parent to allow optional ignore of this rule.
@@ -64,33 +65,49 @@ public final class RequireReleaseDeps extends BannedDependenciesBase {
         boolean callSuper;
         if (onlyWhenRelease) {
             // only call super if this project is a release
-            callSuper = !getSession().getCurrentProject().getArtifact().isSnapshot();
+            callSuper = !project.getPomArtifact().isSnapshot();
         } else {
             callSuper = true;
         }
 
         if (callSuper) {
-            shouldExclude = ArtifactUtils.prepareDependencyArtifactMatcher(getExcludes());
-            shouldInclude = ArtifactUtils.prepareDependencyArtifactMatcher(getIncludes());
+            shouldExclude = ArtifactUtils.prepareDependencyArtifactMatcher(getVersionParser(), getExcludes());
+            shouldInclude = ArtifactUtils.prepareDependencyArtifactMatcher(getVersionParser(), getIncludes());
             super.execute();
             if (failWhenParentIsSnapshot) {
 
-                Artifact parentArtifact = getSession().getCurrentProject().getParentArtifact();
+                Parent parent = project.getModel().getParent();
 
-                if (parentArtifact != null) {
-                    Set<Artifact> singletonArtifact = new HashSet<>();
-                    singletonArtifact.add(parentArtifact);
-                    Set<Artifact> artifacts = filterArtifacts(singletonArtifact);
-                    parentArtifact = ofNullable(artifacts)
-                            .flatMap(s -> s.stream().findFirst())
-                            .orElse(null);
-                }
-
-                if (parentArtifact != null && parentArtifact.isSnapshot()) {
-                    throw new EnforcerRuleException("Parent Cannot be a snapshot: " + parentArtifact.getId());
+                if (parent != null && isIncluded(parent) && getVersionParser().isSnapshot(parent.getVersion())) {
+                    throw new EnforcerRuleException("Parent Cannot be a snapshot: " + parent.getGroupId() + ":"
+                            + parent.getArtifactId() + ":pom:" + parent.getVersion());
                 }
             }
         }
+    }
+
+    /**
+     * The parent is checked only if it matches the includes and does not match the excludes.
+     */
+    private boolean isIncluded(Parent parent) {
+        if (getIncludes() != null
+                && !ArtifactUtils.matchesAny(
+                        getVersionParser(),
+                        getIncludes(),
+                        parent.getGroupId(),
+                        parent.getArtifactId(),
+                        parent.getVersion(),
+                        "pom")) {
+            return false;
+        }
+        return getExcludes() == null
+                || !ArtifactUtils.matchesAny(
+                        getVersionParser(),
+                        getExcludes(),
+                        parent.getGroupId(),
+                        parent.getArtifactId(),
+                        parent.getVersion(),
+                        "pom");
     }
 
     @Override
@@ -112,19 +129,6 @@ public final class RequireReleaseDeps extends BannedDependenciesBase {
      * @param dependencies the list of dependencies to filter
      * @return the resulting set of dependencies
      */
-    private Set<Artifact> filterArtifacts(Set<Artifact> dependencies) throws EnforcerRuleException {
-        if (getIncludes() != null) {
-            dependencies = ArtifactUtils.filterDependencyArtifacts(dependencies, getIncludes());
-        }
-
-        if (dependencies != null && getExcludes() != null) {
-            ofNullable(ArtifactUtils.filterDependencyArtifacts(dependencies, getExcludes()))
-                    .ifPresent(dependencies::removeAll);
-        }
-
-        return dependencies;
-    }
-
     public void setOnlyWhenRelease(boolean onlyWhenRelease) {
         this.onlyWhenRelease = onlyWhenRelease;
     }

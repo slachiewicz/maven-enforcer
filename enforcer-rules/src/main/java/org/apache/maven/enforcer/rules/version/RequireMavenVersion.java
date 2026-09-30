@@ -18,14 +18,14 @@
  */
 package org.apache.maven.enforcer.rules.version;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.Objects;
 
-import org.apache.maven.artifact.versioning.DefaultArtifactVersion;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.Version;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.rtinfo.RuntimeInformation;
 
 /**
  * This rule checks that the Maven version is allowed.
@@ -35,22 +35,22 @@ import org.apache.maven.rtinfo.RuntimeInformation;
 @Named("requireMavenVersion")
 public final class RequireMavenVersion extends AbstractVersionEnforcer {
 
-    private final RuntimeInformation runtimeInformation;
+    private final Session session;
 
     @Inject
-    public RequireMavenVersion(RuntimeInformation runtimeInformation) {
-        this.runtimeInformation = Objects.requireNonNull(runtimeInformation);
+    public RequireMavenVersion(VersionParser versionParser, Session session) {
+        super(versionParser);
+        this.session = Objects.requireNonNull(session);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
-        String mavenVersion = runtimeInformation.getMavenVersion();
+        Version mavenVersion = session.getMavenVersion();
         getLog().debug("Detected Maven Version: " + mavenVersion);
         if (mavenVersion == null) {
             throw new EnforcerRuleException("Unable to detect Maven Version");
         }
-        DefaultArtifactVersion detectedVersion = new DefaultArtifactVersion(mavenVersion);
-        enforceVersion("Maven", getVersion(), detectedVersion);
+        enforceVersion("Maven", getVersion(), mavenVersion);
     }
 
     @Override

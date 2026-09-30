@@ -18,12 +18,14 @@
  */
 package org.apache.maven.enforcer.rules;
 
+import org.apache.maven.api.ProducedArtifact;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.Parent;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.enforcer.rules.utils.EnforcerArtifactStubFactory;
-import org.apache.maven.project.MavenProject;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -33,34 +35,46 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/**
- * The Class TestRequireReleaseVersion.
- *
- * @author <a href="mailto:brianf@apache.org">Brian Fox</a>
- */
 @ExtendWith(MockitoExtension.class)
 class TestRequireReleaseVersion {
 
     @Mock
-    private MavenProject project;
+    private Project project;
 
-    @InjectMocks
+    @Mock
+    private ProducedArtifact artifact;
+
     private RequireReleaseVersion rule;
+
+    @BeforeEach
+    void setUp() {
+        rule = new RequireReleaseVersion(project, EnforcerTestUtils.getVersionParser());
+    }
+
+    private static Model modelWithParent(String parentVersion) {
+        return Model.newBuilder()
+                .parent(Parent.newBuilder()
+                        .groupId("testGroupId")
+                        .artifactId("parent")
+                        .version(parentVersion)
+                        .build())
+                .build();
+    }
 
     @Test
     void testProjectWithReleaseVersion() throws Exception {
-        EnforcerArtifactStubFactory factory = new EnforcerArtifactStubFactory();
-
-        when(project.getArtifact()).thenReturn(factory.getReleaseArtifact());
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(false);
+        when(project.getModel()).thenReturn(Model.newInstance());
 
         assertThatCode(rule::execute).doesNotThrowAnyException();
     }
 
     @Test
     void testProjectWithSnapshotVersion() throws Exception {
-        EnforcerArtifactStubFactory factory = new EnforcerArtifactStubFactory();
-
-        when(project.getArtifact()).thenReturn(factory.getSnapshotArtifact());
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(true);
+        when(project.getId()).thenReturn("testGroupId:snapshot:jar:2.0-SNAPSHOT");
 
         assertThatCode(rule::execute)
                 .isInstanceOf(EnforcerRuleException.class)
@@ -69,10 +83,9 @@ class TestRequireReleaseVersion {
 
     @Test
     void shouldFailWhenParentIsSnapshot() throws Exception {
-        EnforcerArtifactStubFactory factory = new EnforcerArtifactStubFactory();
-
-        when(project.getArtifact()).thenReturn(factory.getReleaseArtifact());
-        when(project.getParentArtifact()).thenReturn(factory.getSnapshotArtifact());
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(false);
+        when(project.getModel()).thenReturn(modelWithParent("2.0-SNAPSHOT"));
 
         rule.setFailWhenParentIsSnapshot(true);
 
@@ -83,20 +96,16 @@ class TestRequireReleaseVersion {
 
     @Test
     void shouldAllowParentSnapshot() throws Exception {
-        EnforcerArtifactStubFactory factory = new EnforcerArtifactStubFactory();
-
-        when(project.getArtifact()).thenReturn(factory.getReleaseArtifact());
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(false);
 
         rule.setFailWhenParentIsSnapshot(false);
 
         assertThatCode(rule::execute).doesNotThrowAnyException();
 
-        verify(project, never()).getParentArtifact();
+        verify(project, never()).getModel();
     }
 
-    /**
-     * Test cache.
-     */
     @Test
     void testCache() {
         assertThat(rule.getCacheId()).isNull();

@@ -36,7 +36,7 @@ First make a new jar project starting with the sample pom below:
 
 <!-- MACRO{snippet|id=project-pom|file=enforcer-api/target/custom-rule-sample/pom.xml} -->
 
-Target bytecode version of rules using an injection pattern must be `1.8` or `11` for Maven versions prior to 3.9.6, **17** is supported by Maven 3.9.6+.
+Rules use the Maven 4 API (`org.apache.maven.api`) and the injection annotations `org.apache.maven.api.di.Named` and `org.apache.maven.api.di.Inject`, so they target Java 17 and run only with Maven 4. The legacy `EnforcerRule`, `EnforcerRule2` and `EnforcerRuleHelper` are removed.
 
 Note that the classloader is shared with the embedding `maven-enforcer-plugin` (a regular [plugin classloader](https://maven.apache.org/guides/mini/guide-maven-classloading.html#Plugin_Classloaders)) and therefore the artifacts `org.apache.maven.enforcer:enforcer-api` are always loaded in the same version as the embedding `maven-enforcer-plugin`.
 

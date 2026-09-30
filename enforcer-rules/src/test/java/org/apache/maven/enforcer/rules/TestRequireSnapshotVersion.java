@@ -18,64 +18,71 @@
  */
 package org.apache.maven.enforcer.rules;
 
+import org.apache.maven.api.ProducedArtifact;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.Parent;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.enforcer.rules.utils.EnforcerArtifactStubFactory;
-import org.apache.maven.project.MavenProject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-/**
- * Test class for the RequireSnapshotVersion rule.
- */
 @ExtendWith(MockitoExtension.class)
 class TestRequireSnapshotVersion {
 
     @Mock
-    private MavenProject project;
+    private Project project;
 
-    private EnforcerArtifactStubFactory factory;
+    @Mock
+    private ProducedArtifact artifact;
 
-    @InjectMocks
     private RequireSnapshotVersion rule;
 
     @BeforeEach
     public void before() {
-        factory = new EnforcerArtifactStubFactory();
+        rule = new RequireSnapshotVersion(project, EnforcerTestUtils.getVersionParser());
+    }
+
+    private static Model modelWithParent(String parentVersion) {
+        return Model.newBuilder()
+                .parent(Parent.newBuilder()
+                        .groupId("testGroupId")
+                        .artifactId("parent")
+                        .version(parentVersion)
+                        .build())
+                .build();
     }
 
     @Test
     void shouldFailForRelease() throws Exception {
-        when(project.getArtifact()).thenReturn(factory.getReleaseArtifact());
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(false);
+        when(project.getId()).thenReturn("testGroupId:release:jar:1.0");
 
         assertThatCode(rule::execute).isInstanceOf(EnforcerRuleException.class);
     }
 
     @Test
     void shouldPassForSnapshot() throws Exception {
-        when(project.getArtifact()).thenReturn(factory.getSnapshotArtifact());
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(true);
+        when(project.getModel()).thenReturn(Model.newInstance());
 
         assertThatCode(rule::execute).doesNotThrowAnyException();
     }
 
     @Test
     void shouldFailForReleaseParent() throws Exception {
-        when(project.getArtifact()).thenReturn(factory.getSnapshotArtifact());
-
-        MavenProject parent = mock(MavenProject.class);
-        when(parent.getArtifact()).thenReturn(factory.getReleaseArtifact());
-
-        when(project.getParent()).thenReturn(parent);
-        when(project.hasParent()).thenReturn(true);
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(true);
+        when(project.getModel()).thenReturn(modelWithParent("1.0"));
 
         rule.setFailWhenParentIsRelease(true);
 
@@ -84,13 +91,9 @@ class TestRequireSnapshotVersion {
 
     @Test
     void shouldPassForSnapshotParent() throws Exception {
-        when(project.getArtifact()).thenReturn(factory.getSnapshotArtifact());
-
-        MavenProject parent = mock(MavenProject.class);
-        when(parent.getArtifact()).thenReturn(factory.getSnapshotArtifact());
-
-        when(project.getParent()).thenReturn(parent);
-        when(project.hasParent()).thenReturn(true);
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(true);
+        when(project.getModel()).thenReturn(modelWithParent("2.0-SNAPSHOT"));
 
         rule.setFailWhenParentIsRelease(true);
 
@@ -99,13 +102,14 @@ class TestRequireSnapshotVersion {
 
     @Test
     void parentShouldNotBeChecked() throws Exception {
-        when(project.getArtifact()).thenReturn(factory.getSnapshotArtifact());
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(true);
 
         rule.setFailWhenParentIsRelease(false);
 
         assertThatCode(rule::execute).doesNotThrowAnyException();
 
-        verify(project).getArtifact();
+        verify(project).getPomArtifact();
         verifyNoMoreInteractions(project);
     }
 }

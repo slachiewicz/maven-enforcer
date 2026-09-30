@@ -18,21 +18,21 @@
  */
 package org.apache.maven.enforcer.rules.dependency;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Predicate;
@@ -42,19 +42,22 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.apache.maven.RepositoryUtils;
+import org.apache.maven.api.Dependency;
+import org.apache.maven.api.Node;
+import org.apache.maven.api.NodeVisitor;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.SessionData;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.di.Priority;
+import org.apache.maven.api.services.DependencyResolverResult;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.AbstractStandardEnforcerRule;
 import org.apache.maven.enforcer.rules.utils.ArtifactMatcher;
 import org.apache.maven.enforcer.rules.utils.ArtifactUtils;
-import org.apache.maven.execution.MavenSession;
-import org.eclipse.aether.graph.Dependency;
-import org.eclipse.aether.graph.DependencyNode;
-import org.eclipse.aether.graph.DependencyVisitor;
-import org.eclipse.aether.util.artifact.ArtifactIdUtils;
-import org.eclipse.aether.util.graph.visitor.TreeDependencyVisitor;
-import org.eclipse.sisu.Priority;
 
 import static java.util.Objects.requireNonNull;
 
@@ -132,6 +135,10 @@ public class EnforceBytecodeVersion extends AbstractStandardEnforcerRule {
     /**
      * Custom message, optional. If configured, will be present on first line of the error message.
      */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static final SessionData.Key<ConcurrentMap<ChecksOptions, Boolean>> PERFORMED_CHECKS =
+            (SessionData.Key) SessionData.key(ConcurrentMap.class, EnforceBytecodeVersion.class);
+
     private String message;
 
     /**
@@ -217,30 +224,41 @@ public class EnforceBytecodeVersion extends AbstractStandardEnforcerRule {
      */
     private final List<String> ignorableClassesPatterns = new ArrayList<>();
 
-    private final MavenSession session;
+    private final Session session;
+
+    private final Project project;
 
     private final ResolverUtil resolverUtil;
 
+    private final VersionParser versionParser;
+
     @Inject
-    EnforceBytecodeVersion(MavenSession session, ResolverUtil resolverUtil) {
+    EnforceBytecodeVersion(Session session, Project project, ResolverUtil resolverUtil, VersionParser versionParser) {
         this.session = requireNonNull(session);
+        this.project = requireNonNull(project);
         this.resolverUtil = requireNonNull(resolverUtil);
+        this.versionParser = requireNonNull(versionParser);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
         validateAndPopulateParameters();
 
-        List<Dependency> dependencies = null;
+        DependencyResolverResult resolved = resolverUtil.resolveDependencies(
+                false, true, ignoreOptionals, ignoredScopes == null ? Collections.emptyList() : ignoredScopes);
+        Map<Dependency, Path> files = resolved.getDependencies();
+
+        List<Dependency> dependencies;
         if (!searchTransitive) {
-            dependencies = session.getCurrentProject().getDependencyArtifacts().stream()
-                    .map(ma -> new Dependency(RepositoryUtils.toArtifact(ma), ma.getScope(), ma.isOptional()))
+            // the direct dependencies, the children of the root node
+            dependencies = resolved.getRoot().getChildren().stream()
+                    .map(Node::getDependency)
+                    .filter(Objects::nonNull)
                     .collect(Collectors.toList());
         } else {
-            dependencies = dependencyGraphToList(resolverUtil.resolveTransitiveDependencies(
-                    false, true, ignoreOptionals, ignoredScopes == null ? Collections.emptyList() : ignoredScopes));
+            dependencies = dependencyGraphToList(resolved.getRoot());
         }
-        List<Dependency> foundExcludes = checkDependencies(filterDependencies(dependencies));
+        List<Dependency> foundExcludes = checkDependencies(filterDependencies(dependencies), files);
         // if any are found, fail the check but list all of them
         if (!foundExcludes.isEmpty()) {
             StringBuilder buf = new StringBuilder();
@@ -249,7 +267,7 @@ public class EnforceBytecodeVersion extends AbstractStandardEnforcerRule {
             }
             for (Dependency dependency : foundExcludes) {
                 buf.append("Found Banned Dependency: ")
-                        .append(ArtifactIdUtils.toId(dependency.getArtifact()))
+                        .append(ArtifactUtils.toId(dependency))
                         .append("\n");
             }
             message = buf + "Use 'mvn dependency:tree' to locate the source of the banned dependencies.";
@@ -287,12 +305,13 @@ public class EnforceBytecodeVersion extends AbstractStandardEnforcerRule {
         }
     }
 
-    private List<Dependency> checkDependencies(List<Dependency> dependencies) throws EnforcerRuleException {
+    private List<Dependency> checkDependencies(List<Dependency> dependencies, Map<Dependency, Path> files)
+            throws EnforcerRuleException {
         long beforeCheck = System.currentTimeMillis();
         List<Dependency> problematic = new ArrayList<>();
         for (Dependency dependency : dependencies) {
             getLog().debug("Analyzing artifact " + dependency);
-            String problem = isBadDependency(dependency);
+            String problem = isBadDependency(dependency, files.get(dependency));
             if (problem != null) {
                 getLog().info(problem);
                 problematic.add(dependency);
@@ -302,24 +321,20 @@ public class EnforceBytecodeVersion extends AbstractStandardEnforcerRule {
         return problematic;
     }
 
-    private String isBadDependency(Dependency d) throws EnforcerRuleException {
-        if (d.getArtifact() == null) {
-            return null;
-        }
-        File f = d.getArtifact().getFile();
-        getLog().debug("isBadDependency() a:" + d + " Artifact getFile():"
-                + d.getArtifact().getFile());
-        if (f == null) {
+    private String isBadDependency(Dependency d, Path path) throws EnforcerRuleException {
+        getLog().debug("isBadDependency() a:" + d + " Artifact path:" + path);
+        if (path == null) {
             // This happens if someone defines dependencies instead of dependencyManagement in a pom file
             // which packaging type is pom.
             return null;
         }
+        File f = path.toFile();
         if (!f.getName().endsWith(".jar")) {
             return null;
         }
         // check did we do this already?
         ChecksOptions checksOptions = new ChecksOptions(
-                ArtifactIdUtils.toId(d.getArtifact()),
+                ArtifactUtils.toId(d),
                 f,
                 ignorableClassesPatterns,
                 maxJavaMajorVersionNumber,
@@ -327,9 +342,7 @@ public class EnforceBytecodeVersion extends AbstractStandardEnforcerRule {
                 strict);
 
         ConcurrentMap<ChecksOptions, Boolean> performedChecks =
-                (ConcurrentMap<ChecksOptions, Boolean>) session.getRepositorySession()
-                        .getData()
-                        .computeIfAbsent(getClass().getSimpleName(), ConcurrentHashMap::new);
+                session.getData().computeIfAbsent(PERFORMED_CHECKS, ConcurrentHashMap::new);
         if (processOncePerSession && performedChecks.putIfAbsent(checksOptions, Boolean.TRUE) != null) {
             // we already performed checks on this file with these parameters
             return null;
@@ -338,11 +351,6 @@ public class EnforceBytecodeVersion extends AbstractStandardEnforcerRule {
         return performCheck(getLog(), checksOptions);
     }
 
-    /**
-     * Input is Dependency file, and it may have been inspected already, but, in multi-module environment the configuration
-     * may be different. Hence, we create a "key" out of config and dependency path, and if already inspected, we
-     * skip on doing same job over and over again.
-     */
     private static class ChecksOptions {
         private final String id;
         private final File file;
@@ -502,25 +510,27 @@ public class EnforceBytecodeVersion extends AbstractStandardEnforcerRule {
         return null;
     }
 
-    private List<Dependency> dependencyGraphToList(DependencyNode root) {
-        ArrayList<Dependency> result = new ArrayList<>();
-        DependencyVisitor visitor = new DependencyVisitor() {
+    private List<Dependency> dependencyGraphToList(Node root) {
+        List<Dependency> result = new ArrayList<>();
+        // the same node can be visited more than once, as in a tree it is the same dependency
+        Set<Node> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        root.accept(new NodeVisitor() {
             @Override
-            public boolean visitEnter(DependencyNode node) {
+            public boolean enter(Node node) {
+                if (!visited.add(node)) {
+                    return false;
+                }
                 if (node.getDependency() != null) {
                     result.add(node.getDependency());
-                } else {
-                    result.add(new Dependency(node.getArtifact(), null));
                 }
                 return true;
             }
 
             @Override
-            public boolean visitLeave(DependencyNode node) {
+            public boolean leave(Node node) {
                 return true;
             }
-        };
-        root.accept(new TreeDependencyVisitor(visitor));
+        });
         return result;
     }
 
@@ -529,17 +539,16 @@ public class EnforceBytecodeVersion extends AbstractStandardEnforcerRule {
         if (includes != null || excludes != null) {
             // ArtifactMatcher returns true for artifacts selected by excludes unless an
             // include overrides that exclusion. Those artifacts must be skipped here.
-            excludedArtifactMatcher = new ArtifactMatcher(excludes, includes);
+            excludedArtifactMatcher = new ArtifactMatcher(versionParser, excludes, includes);
         }
 
         List<Dependency> filteredDependencies = new ArrayList<>();
         for (Dependency dependency : dependencies) {
-            if (excludedArtifactMatcher != null
-                    && excludedArtifactMatcher.match(ArtifactUtils.toArtifact(dependency))) {
+            if (excludedArtifactMatcher != null && excludedArtifactMatcher.match(dependency)) {
                 getLog().debug("Skipping excluded dependency " + dependency);
                 continue;
             }
-            if (scopes != null && !scopes.contains(dependency.getScope())) {
+            if (scopes != null && !scopes.contains(dependency.getScope().id())) {
                 getLog().debug("Skipping " + dependency + " due to scope");
                 continue;
             }

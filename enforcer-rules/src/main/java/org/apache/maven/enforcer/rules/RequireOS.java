@@ -18,23 +18,31 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
+import java.util.Arrays;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Activation;
+import org.apache.maven.api.model.ActivationOS;
+import org.apache.maven.api.model.InputLocation;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.Profile;
+import org.apache.maven.api.services.BuilderProblem;
+import org.apache.maven.api.services.ModelBuilderException;
+import org.apache.maven.api.services.ModelProblem;
+import org.apache.maven.api.services.ModelProblemCollector;
+import org.apache.maven.api.services.OsService;
+import org.apache.maven.api.services.ProblemCollector;
+import org.apache.maven.api.services.model.ProfileActivationContext;
+import org.apache.maven.api.services.model.ProfileActivator;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleError;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.OSUtil;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.model.Activation;
-import org.apache.maven.model.ActivationOS;
-import org.apache.maven.model.Profile;
-import org.apache.maven.model.profile.DefaultProfileActivationContext;
-import org.apache.maven.model.profile.ProfileActivationContext;
-import org.apache.maven.model.profile.activation.ProfileActivator;
-import org.codehaus.plexus.util.Os;
 
 /**
  * This rule checks that the OS is allowed by combinations of family, name, version and cpu architecture. The behavior
@@ -44,9 +52,17 @@ import org.codehaus.plexus.util.Os;
  */
 @Named("requireOS")
 public final class RequireOS extends AbstractStandardEnforcerRule {
+    /**
+     * The valid OS families, the same as in Maven OS profile activation.
+     */
+    private static final Set<String> VALID_FAMILIES = new TreeSet<>(Arrays.asList(
+            "dos", "mac", "netware", "os/2", "tandem", "unix", "windows", "win9x", "z/os", "os/400", "openvms"));
+
     private final ProfileActivator activator;
 
     private final ProfileActivationContext profileActivationContext;
+
+    private final OsService osService;
 
     /**
      * The OS family type desired<br />
@@ -90,20 +106,14 @@ public final class RequireOS extends AbstractStandardEnforcerRule {
      * Instantiates a new RequireOS.
      */
     @Inject
-    RequireOS(@Named("os") ProfileActivator activator, MavenSession session) {
+    RequireOS(@Named("os") ProfileActivator activator, Session session, OsService osService) {
         this.activator = Objects.requireNonNull(activator);
-        this.profileActivationContext = createProfileActivationContext(session);
+        this.osService = Objects.requireNonNull(osService);
+        this.profileActivationContext = createProfileActivationContext(Objects.requireNonNull(session));
     }
 
-    private ProfileActivationContext createProfileActivationContext(MavenSession session) {
-        DefaultProfileActivationContext context = new DefaultProfileActivationContext();
-        context.setActiveProfileIds(session.getRequest().getActiveProfiles());
-        context.setInactiveProfileIds(session.getRequest().getInactiveProfiles());
-        context.setProjectDirectory(session.getCurrentProject().getBasedir());
-        context.setProjectProperties(session.getCurrentProject().getProperties());
-        context.setSystemProperties(System.getProperties());
-        context.setUserProperties(session.getUserProperties());
-        return context;
+    private static ProfileActivationContext createProfileActivationContext(Session session) {
+        return new SessionProfileActivationContext(session);
     }
 
     @Override
@@ -123,10 +133,10 @@ public final class RequireOS extends AbstractStandardEnforcerRule {
                 if (message == null || message.isEmpty()) {
                     // @formatter:off
                     message = "OS Arch: "
-                            + Os.OS_ARCH + " Family: "
-                            + Os.OS_FAMILY + " Name: "
-                            + Os.OS_NAME + " Version: "
-                            + Os.OS_VERSION + " is not allowed by" + (arch != null ? " Arch=" + arch : "")
+                            + osService.arch() + " Family: "
+                            + osService.family() + " Name: "
+                            + osService.name() + " Version: "
+                            + osService.version() + " is not allowed by" + (arch != null ? " Arch=" + arch : "")
                             + (family != null ? " Family=" + family : "")
                             + (name != null ? " Name=" + name : "")
                             + (version != null ? " Version=" + version : "");
@@ -135,7 +145,7 @@ public final class RequireOS extends AbstractStandardEnforcerRule {
                 throw new EnforcerRuleException(message);
             }
         } else {
-            String validFamilies = String.join(",", Os.getValidFamilies());
+            String validFamilies = String.join(",", VALID_FAMILIES);
             throw new EnforcerRuleError("Invalid Family type used. Valid family types are: " + validFamilies);
         }
     }
@@ -144,7 +154,7 @@ public final class RequireOS extends AbstractStandardEnforcerRule {
      * Log the current OS information.
      */
     private void displayOSInfo() {
-        String string = OSUtil.getOSInfo();
+        String string = OSUtil.getOSInfo(osService);
 
         if (!display) {
             getLog().debug(string);
@@ -161,7 +171,7 @@ public final class RequireOS extends AbstractStandardEnforcerRule {
      */
     public boolean isAllowed() {
         // empty lambda as problems collector
-        return activator.isActive(createProfile(), profileActivationContext, (req -> {}));
+        return activator.isActive(createProfile(), profileActivationContext, new NoOpProblemCollector());
     }
 
     /**
@@ -182,64 +192,28 @@ public final class RequireOS extends AbstractStandardEnforcerRule {
      * @return a properly populated profile to be used for OS validation.
      */
     private Profile createProfile() {
-        Profile profile = new Profile();
-        profile.setActivation(createActivation());
-        return profile;
+        return Profile.newBuilder().activation(createActivation()).build();
     }
 
-    /**
-     * Creates an Activation object that contains the ActivationOS information.
-     *
-     * @return a properly populated Activation object.
-     */
     private Activation createActivation() {
-        Activation activation = new Activation();
-        activation.setActiveByDefault(false);
-        activation.setOs(createOsBean());
-        return activation;
+        return Activation.newBuilder().activeByDefault(false).os(createOsBean()).build();
     }
 
-    /**
-     * Creates an ActivationOS object containing family, name, version and arch.
-     *
-     * @return a properly populated ActivationOS object.
-     */
     private ActivationOS createOsBean() {
-        ActivationOS os = new ActivationOS();
-
-        os.setArch(arch);
-        os.setFamily(family);
-        os.setName(name);
-        os.setVersion(version);
-
-        return os;
+        return ActivationOS.newBuilder()
+                .arch(arch)
+                .family(family)
+                .name(name)
+                .version(version)
+                .build();
     }
 
-    /**
-     * Helper method to check if the given family is in the following list:
-     * <ul>
-     * <li>dos</li>
-     * <li>mac</li>
-     * <li>netware</li>
-     * <li>os/2</li>
-     * <li>tandem</li>
-     * <li>unix</li>
-     * <li>windows</li>
-     * <li>win9x</li>
-     * <li>z/os</li>
-     * <li>os/400</li>
-     * </ul>
-     * Note: '!' is allowed at the beginning of the string and still considered valid.
-     *
-     * @param family the family to check
-     * @return true if one of the valid families
-     */
     public boolean isValidFamily(String family) {
 
         // in case they are checking !family
         family = StringUtils.stripStart(family, "!");
 
-        return (family == null || family.isEmpty()) || Os.getValidFamilies().contains(family);
+        return (family == null || family.isEmpty()) || VALID_FAMILIES.contains(family);
     }
 
     /**
@@ -309,5 +283,112 @@ public final class RequireOS extends AbstractStandardEnforcerRule {
         return String.format(
                 "RequireOS[message=%s, arch=%s, family=%s, name=%s, version=%s, display=%b]",
                 getMessage(), arch, family, name, version, display);
+    }
+
+    /**
+     * The OS activator reads only system properties, the rest of the context is not available in the API.
+     */
+    private static final class SessionProfileActivationContext implements ProfileActivationContext {
+
+        private final Session session;
+
+        SessionProfileActivationContext(Session session) {
+            this.session = session;
+        }
+
+        @Override
+        public boolean isProfileActive(String profileId) {
+            return false;
+        }
+
+        @Override
+        public boolean isProfileInactive(String profileId) {
+            return false;
+        }
+
+        @Override
+        public String getSystemProperty(String key) {
+            return System.getProperty(key);
+        }
+
+        @Override
+        public String getUserProperty(String key) {
+            return session.getUserProperties().get(key);
+        }
+
+        @Override
+        public String getModelProperty(String key) {
+            return null;
+        }
+
+        @Override
+        public String getModelArtifactId() {
+            return null;
+        }
+
+        @Override
+        public String getModelPackaging() {
+            return null;
+        }
+
+        @Override
+        public String getModelRootDirectory() {
+            return null;
+        }
+
+        @Override
+        public String getModelBaseDirectory() {
+            return null;
+        }
+
+        @Override
+        public String interpolatePath(String path) {
+            return path;
+        }
+
+        @Override
+        public boolean exists(String path, boolean enableRegex) {
+            return false;
+        }
+    }
+
+    private static final class NoOpProblemCollector implements ModelProblemCollector {
+
+        @Override
+        public ProblemCollector<ModelProblem> getProblemCollector() {
+            return ProblemCollector.empty();
+        }
+
+        @Override
+        public void add(
+                BuilderProblem.Severity severity,
+                ModelProblem.Version version,
+                String message,
+                InputLocation location,
+                Exception exception) {}
+
+        @Override
+        public ModelBuilderException newModelBuilderException() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void setSource(String source) {}
+
+        @Override
+        public void setSource(Model source) {}
+
+        @Override
+        public String getSource() {
+            return null;
+        }
+
+        @Override
+        public void setRootModel(Model rootModel) {}
+
+        @Override
+        public Model getRootModel() {
+            return null;
+        }
     }
 }

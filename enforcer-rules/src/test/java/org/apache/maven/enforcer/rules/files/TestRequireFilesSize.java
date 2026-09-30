@@ -27,13 +27,13 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.UUID;
 
-import org.apache.maven.artifact.Artifact;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.services.ProjectManager;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.enforcer.rules.utils.EnforcerArtifactStubFactory;
-import org.apache.maven.project.MavenProject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,7 +45,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
@@ -61,7 +60,10 @@ class TestRequireFilesSize {
     private File temporaryFolder;
 
     @Mock
-    private MavenProject project;
+    private Project project;
+
+    @Mock
+    private ProjectManager projectManager;
 
     @Mock
     private EnforcerLogger log;
@@ -107,14 +109,7 @@ class TestRequireFilesSize {
 
         File f = File.createTempFile("junit", null, temporaryFolder);
 
-        EnforcerArtifactStubFactory factory = new EnforcerArtifactStubFactory();
-        Artifact a = factory.getReleaseArtifact();
-        a.setFile(f);
-
-        when(project.getArtifact()).thenReturn(a);
-
-        // sanity check the mockProject
-        assertSame(f, project.getArtifact().getFile());
+        when(projectManager.getPath(project)).thenReturn(Optional.of(f.toPath()));
 
         rule.execute();
     }

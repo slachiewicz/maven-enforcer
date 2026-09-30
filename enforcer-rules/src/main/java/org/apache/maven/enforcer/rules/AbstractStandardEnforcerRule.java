@@ -18,9 +18,9 @@
  */
 package org.apache.maven.enforcer.rules;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.InputLocation;
 import org.apache.maven.enforcer.rule.api.AbstractEnforcerRule;
-import org.apache.maven.model.InputLocation;
-import org.apache.maven.project.MavenProject;
 
 /**
  * Abstract help rule.
@@ -45,7 +45,7 @@ public abstract class AbstractStandardEnforcerRule extends AbstractEnforcerRule 
      * @param project the project
      * @return the identifier of the project in the format {@code <groupId>:<artifactId>:<version>}
      */
-    private static String getProjectId(MavenProject project) {
+    private static String getProjectId(Project project) {
         StringBuilder buffer = new StringBuilder(128);
 
         buffer.append(
@@ -74,7 +74,7 @@ public abstract class AbstractStandardEnforcerRule extends AbstractEnforcerRule 
      * @param location The location which should be formatted, must not be {@code null}.
      * @return The formatted problem location or an empty string if unknown, never {@code null}.
      */
-    protected static String formatLocation(MavenProject project, InputLocation location) {
+    protected static String formatLocation(Project project, InputLocation location) {
         StringBuilder buffer = new StringBuilder();
 
         if (!location.getSource().getModelId().equals(getProjectId(project))) {

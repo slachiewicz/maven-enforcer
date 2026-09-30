@@ -18,12 +18,12 @@
  */
 package org.apache.maven.enforcer.rules;
 
+import org.apache.maven.api.MojoExecution;
+import org.apache.maven.api.Plugin;
+import org.apache.maven.api.xml.XmlNode;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.ExpressionEvaluator;
-import org.apache.maven.plugin.MojoExecution;
-import org.apache.maven.plugin.descriptor.MojoDescriptor;
-import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -67,9 +68,9 @@ class TestExternalRules {
     @Test
     void shouldFailIfClasspathLocationIsNotFound() {
 
-        MojoDescriptor mojoDescriptor = new MojoDescriptor();
-        mojoDescriptor.setRealm(EnforcerTestUtils.getTestClassRealm());
-        when(mojoExecution.getMojoDescriptor()).thenReturn(mojoDescriptor);
+        Plugin plugin = mock(Plugin.class);
+        when(plugin.getClassLoader()).thenReturn(EnforcerTestUtils.class.getClassLoader());
+        when(mojoExecution.getPlugin()).thenReturn(plugin);
         rule.setLocation("classpath:foo");
 
         assertThatExceptionOfType(EnforcerRuleException.class)
@@ -89,34 +90,51 @@ class TestExternalRules {
 
     @Test
     void shouldLoadRulesFromClassPath() throws EnforcerRuleException {
-        MojoDescriptor mojoDescriptor = new MojoDescriptor();
-        mojoDescriptor.setRealm(EnforcerTestUtils.getTestClassRealm());
-        when(mojoExecution.getMojoDescriptor()).thenReturn(mojoDescriptor);
+        Plugin plugin = mock(Plugin.class);
+        when(plugin.getClassLoader()).thenReturn(EnforcerTestUtils.class.getClassLoader());
+        when(mojoExecution.getPlugin()).thenReturn(plugin);
         rule.setLocation("classpath:enforcer-rules/pass.xml");
 
-        Xpp3Dom rulesConfig = rule.getRulesConfig();
+        XmlNode rulesConfig = rule.getRulesConfig();
         assertNotNull(rulesConfig);
-        assertEquals(2, rulesConfig.getChildCount());
+        assertEquals(2, rulesConfig.children().size());
     }
 
     @Test
     void shouldFilterRules() throws EnforcerRuleException {
-        MojoDescriptor mojoDescriptor = new MojoDescriptor();
-        mojoDescriptor.setRealm(EnforcerTestUtils.getTestClassRealm());
-        when(mojoExecution.getMojoDescriptor()).thenReturn(mojoDescriptor);
+        Plugin plugin = mock(Plugin.class);
+        when(plugin.getClassLoader()).thenReturn(EnforcerTestUtils.class.getClassLoader());
+        when(mojoExecution.getPlugin()).thenReturn(plugin);
         rule.setLocation("classpath:enforcer-rules/banned-dependencies.xml");
         rule.setXsltLocation("classpath:enforcer-rules/allow-findbugs.xsl");
 
-        Xpp3Dom rulesConfig = rule.getRulesConfig();
+        XmlNode rulesConfig = rule.getRulesConfig();
         assertNotNull(rulesConfig);
-        assertEquals(1, rulesConfig.getChildCount());
-        assertEquals("bannedDependencies", rulesConfig.getChild(0).getName());
-        assertEquals(1, rulesConfig.getChild(0).getChildCount());
-        assertEquals("excludes", rulesConfig.getChild(0).getChild(0).getName());
-        assertEquals(1, rulesConfig.getChild(0).getChild(0).getChildCount());
-        assertEquals("exclude", rulesConfig.getChild(0).getChild(0).getChild(0).getName());
+        assertEquals(1, rulesConfig.children().size());
+        assertEquals("bannedDependencies", rulesConfig.children().get(0).name());
+        assertEquals(1, rulesConfig.children().get(0).children().size());
+        assertEquals("excludes", rulesConfig.children().get(0).children().get(0).name());
+        assertEquals(
+                1, rulesConfig.children().get(0).children().get(0).children().size());
+        assertEquals(
+                "exclude",
+                rulesConfig
+                        .children()
+                        .get(0)
+                        .children()
+                        .get(0)
+                        .children()
+                        .get(0)
+                        .name());
         assertEquals(
                 "com.google.guava:listenablefuture",
-                rulesConfig.getChild(0).getChild(0).getChild(0).getValue());
+                rulesConfig
+                        .children()
+                        .get(0)
+                        .children()
+                        .get(0)
+                        .children()
+                        .get(0)
+                        .value());
     }
 }

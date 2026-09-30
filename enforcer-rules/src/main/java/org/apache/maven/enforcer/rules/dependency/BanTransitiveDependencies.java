@@ -18,24 +18,18 @@
  */
 package org.apache.maven.enforcer.rules.dependency;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.maven.RepositoryUtils;
+import org.apache.maven.api.Node;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.AbstractStandardEnforcerRule;
 import org.apache.maven.enforcer.rules.utils.ArtifactMatcher;
 import org.apache.maven.enforcer.rules.utils.ArtifactUtils;
-import org.apache.maven.execution.MavenSession;
-import org.eclipse.aether.artifact.ArtifactTypeRegistry;
-import org.eclipse.aether.graph.Dependency;
-import org.eclipse.aether.graph.DependencyNode;
 
 import static java.util.Optional.ofNullable;
 
@@ -66,28 +60,23 @@ public final class BanTransitiveDependencies extends AbstractStandardEnforcerRul
      */
     private List<String> includes;
 
-    private final MavenSession session;
-
     private final ResolverUtil resolverUtil;
 
+    private final VersionParser versionParser;
+
     @Inject
-    public BanTransitiveDependencies(MavenSession session, ResolverUtil resolverUtil) {
-        this.session = Objects.requireNonNull(session);
+    public BanTransitiveDependencies(ResolverUtil resolverUtil, VersionParser versionParser) {
         this.resolverUtil = Objects.requireNonNull(resolverUtil);
+        this.versionParser = Objects.requireNonNull(versionParser);
     }
 
     /**
      * Searches dependency tree recursively for transitive dependencies that are not excluded, while generating nice
      * info message along the way.
      */
-    private static boolean searchTree(
-            DependencyNode node,
-            int level,
-            ArtifactMatcher excludes,
-            Set<Dependency> directDependencies,
-            StringBuilder message) {
+    private static boolean searchTree(Node node, int level, ArtifactMatcher excludes, StringBuilder message) {
 
-        List<DependencyNode> children = node.getChildren();
+        List<Node> children = node.getChildren();
 
         /*
          * if the node is deeper than direct dependency and is empty, it is transitive.
@@ -106,21 +95,19 @@ public final class BanTransitiveDependencies extends AbstractStandardEnforcerRul
             // is excluded, we don't care about descendants
             excluded = true;
             hasTransitiveDependencies = false;
-        } else if (directDependencies.contains(node.getDependency())) {
-            hasTransitiveDependencies = false;
         } else {
-            for (DependencyNode childNode : children) {
+            for (Node childNode : children) {
                 /*
                  * if any of the children has transitive d. so does the parent
                  */
-                hasTransitiveDependencies = hasTransitiveDependencies
-                        || searchTree(childNode, level + 1, excludes, directDependencies, messageFromChildren);
+                hasTransitiveDependencies =
+                        hasTransitiveDependencies || searchTree(childNode, level + 1, excludes, messageFromChildren);
             }
         }
 
         if ((excluded || hasTransitiveDependencies) && message != null) // then generate message
         {
-            message.append(StringUtils.repeat("   ", level)).append(node.getArtifact());
+            message.append(StringUtils.repeat("   ", level)).append(ArtifactUtils.toId(node.getArtifact()));
 
             if (excluded) {
                 message.append(" [excluded]").append(System.lineSeparator());
@@ -140,16 +127,11 @@ public final class BanTransitiveDependencies extends AbstractStandardEnforcerRul
 
     @Override
     public void execute() throws EnforcerRuleException {
-        ArtifactTypeRegistry artifactTypeRegistry =
-                session.getRepositorySession().getArtifactTypeRegistry();
-        ArtifactMatcher exclusions = new ArtifactMatcher(excludes, includes);
-        Set<Dependency> directDependencies = session.getCurrentProject().getDependencies().stream()
-                .map(d -> RepositoryUtils.toDependency(d, artifactTypeRegistry))
-                .collect(Collectors.toSet());
+        ArtifactMatcher exclusions = new ArtifactMatcher(versionParser, excludes, includes);
 
-        DependencyNode rootNode = resolverUtil.resolveTransitiveDependencies();
+        Node rootNode = resolverUtil.resolveTransitiveDependencies();
         StringBuilder generatedMessage = new StringBuilder();
-        if (searchTree(rootNode, 0, exclusions, directDependencies, generatedMessage)) {
+        if (searchTree(rootNode, 0, exclusions, generatedMessage)) {
             throw new EnforcerRuleException(ofNullable(getMessage()).orElse(generatedMessage.toString()));
         }
     }

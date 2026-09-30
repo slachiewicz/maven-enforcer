@@ -18,17 +18,17 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.RemoteRepository;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.services.ProjectManager;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.project.MavenProject;
-import org.eclipse.aether.repository.RemoteRepository;
 
 /**
  * This rule checks whether this project's maven session has banned repositories.
@@ -65,11 +65,14 @@ public final class BannedRepositories extends AbstractStandardEnforcerRule {
      */
     private List<String> allowedPluginRepositories = Collections.emptyList();
 
-    private final MavenProject project;
+    private final Project project;
+
+    private final ProjectManager projectManager;
 
     @Inject
-    public BannedRepositories(MavenProject project) {
+    public BannedRepositories(Project project, ProjectManager projectManager) {
         this.project = Objects.requireNonNull(project);
+        this.projectManager = Objects.requireNonNull(projectManager);
     }
 
     // ----------------------------------------------------------------------
@@ -80,10 +83,14 @@ public final class BannedRepositories extends AbstractStandardEnforcerRule {
     public void execute() throws EnforcerRuleException {
 
         List<RemoteRepository> resultBannedRepos = checkRepositories(
-                project.getRemoteProjectRepositories(), this.allowedRepositories, this.bannedRepositories);
+                projectManager.getRemoteProjectRepositories(project),
+                this.allowedRepositories,
+                this.bannedRepositories);
 
         List<RemoteRepository> resultBannedPluginRepos = checkRepositories(
-                project.getRemotePluginRepositories(), this.allowedPluginRepositories, this.bannedPluginRepositories);
+                projectManager.getRemotePluginRepositories(project),
+                this.allowedPluginRepositories,
+                this.bannedPluginRepositories);
 
         String repoErrMsg = populateErrorMessage(resultBannedRepos, " ");
         String pluginRepoErrMsg = populateErrorMessage(resultBannedPluginRepos, " plugin ");

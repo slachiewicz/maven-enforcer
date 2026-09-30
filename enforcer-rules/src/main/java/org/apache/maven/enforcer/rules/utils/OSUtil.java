@@ -18,7 +18,7 @@
  */
 package org.apache.maven.enforcer.rules.utils;
 
-import org.codehaus.plexus.util.Os;
+import org.apache.maven.api.services.OsService;
 
 /**
  * Common os utility.
@@ -31,12 +31,13 @@ public class OSUtil {
     /**
      * OS Information used by Enforcer rules and display Mojo.
      *
+     * @param osService the OS service
      * @return an on information
      */
-    public static String getOSInfo() {
+    public static String getOSInfo(OsService osService) {
 
         return String.format(
                 "OS Info - Arch: %s, Family: %s, Name: %s, Version: %s",
-                Os.OS_ARCH, Os.OS_FAMILY, Os.OS_NAME, Os.OS_VERSION);
+                osService.arch(), osService.family(), osService.name(), osService.version());
     }
 }

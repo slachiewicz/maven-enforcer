@@ -21,9 +21,9 @@ package org.apache.maven.enforcer.rules.version;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.SystemUtils;
-import org.apache.maven.artifact.versioning.DefaultArtifactVersion;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
+import org.apache.maven.enforcer.rules.EnforcerTestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -47,7 +47,7 @@ class TestRequireJavaVersion {
 
     @BeforeEach
     void setup() {
-        rule = new RequireJavaVersion();
+        rule = new RequireJavaVersion(EnforcerTestUtils.getVersionParser());
         rule.setLog(mock(EnforcerLogger.class));
     }
     /**
@@ -105,12 +105,15 @@ class TestRequireJavaVersion {
     @Test
     void exactFivePartJavaVersionIsAllowedEvenWhenNormalizedFormDiffers() throws EnforcerRuleException {
         String exact = "21.0.10.0.1";
-        rule.enforceVersion("JDK", exact, new DefaultArtifactVersion(exact));
+        rule.enforceVersion("JDK", exact, EnforcerTestUtils.getVersionParser().parseVersion(exact));
     }
 
     @Test
     void normalizedFivePartJavaVersionIsNotInTheExactRequiredRange() {
-        assertThatThrownBy(() -> rule.enforceVersion("JDK", "21.0.10.0.1", new DefaultArtifactVersion("21.0.10-0")))
+        assertThatThrownBy(() -> rule.enforceVersion(
+                        "JDK",
+                        "21.0.10.0.1",
+                        EnforcerTestUtils.getVersionParser().parseVersion("21.0.10-0")))
                 .isInstanceOf(EnforcerRuleException.class);
     }
 

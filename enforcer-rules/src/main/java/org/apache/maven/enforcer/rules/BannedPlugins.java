@@ -18,17 +18,19 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
 
-import org.apache.maven.artifact.Artifact;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Build;
+import org.apache.maven.api.model.Plugin;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.ArtifactUtils;
-import org.apache.maven.execution.MavenSession;
 
 /**
  * This rule checks that lists of plugins are not included.
@@ -58,23 +60,33 @@ public final class BannedPlugins extends AbstractStandardEnforcerRule {
      */
     private List<String> includes = null;
 
-    private final MavenSession session;
+    private final Project project;
+
+    private final VersionParser versionParser;
 
     @Inject
-    public BannedPlugins(MavenSession session) {
-        this.session = Objects.requireNonNull(session);
+    public BannedPlugins(Project project, VersionParser versionParser) {
+        this.project = Objects.requireNonNull(project);
+        this.versionParser = Objects.requireNonNull(versionParser);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
-        Predicate<Artifact> shouldExclude = ArtifactUtils.prepareDependencyArtifactMatcher(excludes);
-        Predicate<Artifact> shouldInclude = ArtifactUtils.prepareDependencyArtifactMatcher(includes);
-        String result = session.getCurrentProject().getPluginArtifacts().stream()
+        Predicate<Plugin> shouldExclude = ArtifactUtils.preparePluginMatcher(versionParser, excludes);
+        Predicate<Plugin> shouldInclude = ArtifactUtils.preparePluginMatcher(versionParser, includes);
+        Build build = project.getModel().getBuild();
+        List<Plugin> plugins = build != null ? build.getPlugins() : Collections.emptyList();
+        String result = plugins.stream()
                 .filter(a -> !(!shouldExclude.test(a) || shouldInclude.test(a)))
                 .collect(
                         StringBuilder::new,
-                        (messageBuilder, node) ->
-                                messageBuilder.append(node.getId()).append(" <--- banned plugin"),
+                        (messageBuilder, plugin) -> messageBuilder
+                                .append(plugin.getGroupId())
+                                .append(':')
+                                .append(plugin.getArtifactId())
+                                .append(":maven-plugin:")
+                                .append(plugin.getVersion())
+                                .append(" <--- banned plugin"),
                         (m1, m2) -> m1.append(m2.toString()))
                 .toString();
         if (!result.isEmpty()) {

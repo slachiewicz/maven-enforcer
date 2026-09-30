@@ -20,17 +20,15 @@
 // START SNIPPET: rule-implementation
 package org.example.custom.rule;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.List;
 import java.util.Objects;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
 import org.apache.maven.enforcer.rule.api.AbstractEnforcerRule;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.project.MavenProject;
-import org.apache.maven.rtinfo.RuntimeInformation;
 
 /**
  * Custom Enforcer Rule - example
@@ -50,17 +48,14 @@ public class MyCustomRule extends AbstractEnforcerRule {
 
     // Inject needed Maven components
 
-    private final MavenProject project;
+    private final Project project;
 
-    private final MavenSession session;
-
-    private final RuntimeInformation runtimeInformation;
+    private final Session session;
 
     @Inject
-    public MyCustomRule(MavenProject project, MavenSession session, RuntimeInformation runtimeInformation) {
+    public MyCustomRule(Project project, Session session) {
         this.project = Objects.requireNonNull(project);
         this.session = Objects.requireNonNull(session);
-        this.runtimeInformation = Objects.requireNonNull(runtimeInformation);
     }
 
     public void execute() throws EnforcerRuleException {
@@ -68,7 +63,7 @@ public class MyCustomRule extends AbstractEnforcerRule {
         getLog().info("Retrieved Target Folder: " + project.getBuild().getDirectory());
         getLog().info("Retrieved ArtifactId: " + project.getArtifactId());
         getLog().info("Retrieved Project: " + project);
-        getLog().info("Retrieved Maven version: " + runtimeInformation.getMavenVersion());
+        getLog().info("Retrieved Maven version: " + session.getMavenVersion());
         getLog().info("Retrieved Session: " + session);
         getLog().warnOrError("Parameter shouldIfail: " + shouldIfail);
         getLog().info(() -> "Parameter listParameters: " + listParameters);

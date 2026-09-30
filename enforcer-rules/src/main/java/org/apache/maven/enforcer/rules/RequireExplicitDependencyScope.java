@@ -18,17 +18,18 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.text.ChoiceFormat;
 import java.util.List;
 import java.util.Objects;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Dependency;
+import org.apache.maven.api.services.xml.ModelXmlFactory;
 import org.apache.maven.enforcer.rule.api.EnforcerLevel;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.model.Dependency;
-import org.apache.maven.project.MavenProject;
+import org.apache.maven.enforcer.rules.utils.OriginalModels;
 
 /**
  * Checks that all dependencies have an explicitly declared scope in the non-effective pom (i.e. without taking
@@ -37,17 +38,21 @@ import org.apache.maven.project.MavenProject;
 @Named("requireExplicitDependencyScope")
 public final class RequireExplicitDependencyScope extends AbstractStandardEnforcerRule {
 
-    private final MavenProject project;
+    private final Project project;
+
+    private final ModelXmlFactory modelXmlFactory;
 
     @Inject
-    public RequireExplicitDependencyScope(MavenProject project) {
+    public RequireExplicitDependencyScope(Project project, ModelXmlFactory modelXmlFactory) {
         this.project = Objects.requireNonNull(project);
+        this.modelXmlFactory = Objects.requireNonNull(modelXmlFactory);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
         int numMissingDependencyScopes = 0;
-        List<Dependency> dependencies = project.getOriginalModel().getDependencies(); // this is the non-effective
+        List<Dependency> dependencies =
+                OriginalModels.read(modelXmlFactory, project).getDependencies(); // this is the non-effective
         // model but the original one
         // without inheritance and
         // interpolation resolved

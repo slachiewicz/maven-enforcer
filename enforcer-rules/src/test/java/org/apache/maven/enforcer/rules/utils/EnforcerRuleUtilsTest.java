@@ -21,9 +21,8 @@ package org.apache.maven.enforcer.rules.utils;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.maven.model.Plugin;
-import org.apache.maven.model.ReportPlugin;
-import org.codehaus.plexus.component.configurator.expression.ExpressionEvaluationException;
+import org.apache.maven.api.model.Plugin;
+import org.apache.maven.api.model.ReportPlugin;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,27 +32,24 @@ import static org.mockito.Mockito.when;
 
 class EnforcerRuleUtilsTest {
 
-    // strips "${" and "}" like MockEnforcerExpressionEvaluator
+    // strips "${" and "}" like TestExpressionEvaluator
     private final EnforcerRuleUtils utils = new EnforcerRuleUtils(evaluator());
 
     private static ExpressionEvaluator evaluator() {
-        try {
-            ExpressionEvaluator evaluator = mock(ExpressionEvaluator.class);
-            when(evaluator.evaluate(anyString()))
-                    .thenAnswer(invocation ->
-                            invocation.getArgument(0, String.class).replaceAll("\\$\\{|}", ""));
-            return evaluator;
-        } catch (ExpressionEvaluationException e) {
-            throw new IllegalStateException(e);
-        }
+        ExpressionEvaluator evaluator = mock(ExpressionEvaluator.class);
+        when(evaluator.evaluate(anyString()))
+                .thenAnswer(
+                        invocation -> invocation.getArgument(0, String.class).replaceAll("\\$\\{|}", ""));
+        return evaluator;
     }
 
     @Test
     void resolvePluginsDoesNotChangeModelPlugins() {
-        Plugin plugin = new Plugin();
-        plugin.setGroupId("${group}");
-        plugin.setArtifactId("${artifact}");
-        plugin.setVersion("${version}");
+        Plugin plugin = Plugin.newBuilder()
+                .groupId("${group}")
+                .artifactId("${artifact}")
+                .version("${version}")
+                .build();
 
         List<Plugin> resolved = utils.resolvePlugins(Collections.singletonList(plugin));
 
@@ -67,10 +63,11 @@ class EnforcerRuleUtilsTest {
 
     @Test
     void resolveReportPluginsDoesNotChangeModelPlugins() {
-        ReportPlugin plugin = new ReportPlugin();
-        plugin.setGroupId("${group}");
-        plugin.setArtifactId("${artifact}");
-        plugin.setVersion("${version}");
+        ReportPlugin plugin = ReportPlugin.newBuilder()
+                .groupId("${group}")
+                .artifactId("${artifact}")
+                .version("${version}")
+                .build();
 
         List<ReportPlugin> resolved = utils.resolveReportPlugins(Collections.singletonList(plugin));
 

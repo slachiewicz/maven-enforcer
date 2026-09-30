@@ -18,9 +18,6 @@
  */
 package org.apache.maven.enforcer.rules.checksum;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
@@ -30,10 +27,12 @@ import java.util.Objects;
 
 import org.apache.commons.io.input.ReaderInputStream;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleError;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.checksum.NormalizeLineSeparatorReader.LineSeparator;
-import org.apache.maven.project.MavenProject;
 
 /**
  * Rule to validate a text file to match the specified checksum.
@@ -48,10 +47,10 @@ public final class RequireTextFileChecksum extends RequireFileChecksum {
 
     private Charset encoding;
 
-    private final MavenProject project;
+    private final Project project;
 
     @Inject
-    public RequireTextFileChecksum(MavenProject project) {
+    public RequireTextFileChecksum(Project project) {
         this.project = Objects.requireNonNull(project);
     }
 
@@ -72,7 +71,7 @@ public final class RequireTextFileChecksum extends RequireFileChecksum {
         // set defaults
         if (encoding == null) {
             // https://maven.apache.org/plugins/maven-resources-plugin/examples/encoding.html
-            String projectEncoding = project.getProperties().getProperty("project.build.sourceEncoding", null);
+            String projectEncoding = project.getModel().getProperties().get("project.build.sourceEncoding");
             if (StringUtils.isBlank(projectEncoding)) {
                 encoding = Charset.defaultCharset();
                 getLog().warn(

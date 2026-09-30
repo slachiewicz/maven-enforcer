@@ -18,16 +18,14 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.Objects;
 
 import bsh.EvalError;
 import bsh.Interpreter;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.codehaus.plexus.component.configurator.expression.ExpressionEvaluationException;
-import org.codehaus.plexus.component.configurator.expression.ExpressionEvaluator;
+import org.apache.maven.enforcer.rules.utils.ExpressionEvaluator;
 
 /**
  * Rule for Maven Enforcer using Beanshell to evaluate a conditional expression.
@@ -79,7 +77,7 @@ public final class EvaluateBeanshell extends AbstractStandardEnforcerRule {
                 }
                 throw new EnforcerRuleException(message);
             }
-        } catch (ExpressionEvaluationException e) {
+        } catch (IllegalStateException e) {
             throw new EnforcerRuleException("Unable to evaluate an expression '" + condition + "'", e);
         }
     }

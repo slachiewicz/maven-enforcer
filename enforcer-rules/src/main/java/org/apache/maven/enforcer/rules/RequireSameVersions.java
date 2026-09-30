@@ -18,9 +18,6 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -32,13 +29,18 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
-import org.apache.maven.artifact.Artifact;
+import org.apache.maven.api.Node;
+import org.apache.maven.api.PathScope;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Build;
+import org.apache.maven.api.model.Plugin;
+import org.apache.maven.api.model.PluginManagement;
+import org.apache.maven.api.model.ReportPlugin;
+import org.apache.maven.api.model.Reporting;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.model.Plugin;
-import org.apache.maven.model.PluginManagement;
-import org.apache.maven.model.ReportPlugin;
-import org.apache.maven.project.MavenProject;
 
 /**
  * @author Robert Scholte
@@ -58,12 +60,12 @@ public final class RequireSameVersions extends AbstractStandardEnforcerRule {
 
     private boolean sameModuleVersions;
 
-    private final MavenProject project;
+    private final Project project;
 
-    private final MavenSession session;
+    private final Session session;
 
     @Inject
-    public RequireSameVersions(MavenProject project, MavenSession session) {
+    public RequireSameVersions(Project project, Session session) {
         this.project = Objects.requireNonNull(project);
         this.session = Objects.requireNonNull(session);
     }
@@ -79,19 +81,19 @@ public final class RequireSameVersions extends AbstractStandardEnforcerRule {
         allReportPlugins.addAll(plugins);
         // CHECKSTYLE_OFF: LineLength
         versionMembers.putAll(collectVersionMembers(
-                project.getArtifacts(),
+                getDependencyArtifacts(),
                 dependencies,
                 " (dependency)",
-                artifact -> uniqueVersions ? artifact.getVersion() : artifact.getBaseVersion()));
+                artifact -> uniqueVersions ? artifact.version : artifact.baseVersion));
 
         versionMembers.putAll(collectVersionMembers(
-                project.getPluginArtifacts(),
+                getPluginArtifacts(),
                 allBuildPlugins,
                 " (buildPlugin)",
-                artifact -> uniqueVersions ? artifact.getVersion() : artifact.getBaseVersion()));
+                artifact -> uniqueVersions ? artifact.version : artifact.baseVersion));
 
         versionMembers.putAll(collectVersionMembers(
-                project.getReportArtifacts(), allReportPlugins, " (reportPlugin)", this::getReportPluginVersion));
+                getReportArtifacts(), allReportPlugins, " (reportPlugin)", this::getReportPluginVersion));
         // CHECKSTYLE_ON: LineLength
 
         if (versionMembers.size() > 1) {
@@ -110,7 +112,10 @@ public final class RequireSameVersions extends AbstractStandardEnforcerRule {
         }
 
         if (sameModuleVersions) {
-            MavenProject topLevelProject = session.getTopLevelProject();
+            Project topLevelProject = session.getProjects().stream()
+                    .filter(Project::isTopProject)
+                    .findFirst()
+                    .orElse(project);
             if (!Objects.equals(topLevelProject.getVersion(), project.getVersion())) {
                 StringBuilder builder = new StringBuilder();
                 if (getMessage() != null) {
@@ -124,10 +129,10 @@ public final class RequireSameVersions extends AbstractStandardEnforcerRule {
     }
 
     private Map<String, List<String>> collectVersionMembers(
-            Set<Artifact> artifacts,
+            Collection<ArtifactInfo> artifacts,
             Collection<String> patterns,
             String source,
-            Function<Artifact, String> versionResolver) {
+            Function<ArtifactInfo, String> versionResolver) {
         Map<String, List<String>> versionMembers = new LinkedHashMap<>();
 
         List<Pattern> regExs = new ArrayList<>();
@@ -141,50 +146,119 @@ public final class RequireSameVersions extends AbstractStandardEnforcerRule {
             regExs.add(Pattern.compile(regex + "(\\:.+)?"));
         }
 
-        for (Artifact artifact : artifacts) {
+        for (ArtifactInfo artifact : artifacts) {
             for (Pattern regEx : regExs) {
-                if (regEx.matcher(artifact.getDependencyConflictId()).matches()) {
+                if (regEx.matcher(artifact.conflictId).matches()) {
                     String version = versionResolver.apply(artifact);
                     versionMembers
                             .computeIfAbsent(version, unused -> new ArrayList<>())
-                            .add(artifact.getDependencyConflictId() + source);
+                            .add(artifact.conflictId + source);
                 }
             }
         }
         return versionMembers;
     }
 
-    private String getReportPluginVersion(Artifact artifact) {
-        for (ReportPlugin reportPlugin : project.getReportPlugins()) {
-            if (Objects.equals(artifact.getGroupId(), reportPlugin.getGroupId())
-                    && Objects.equals(artifact.getArtifactId(), reportPlugin.getArtifactId())
-                    && reportPlugin.getVersion() != null) {
-                return reportPlugin.getVersion();
+    private List<ArtifactInfo> getDependencyArtifacts() {
+        Node root = session.collectDependencies(project, PathScope.TEST_RUNTIME);
+        List<ArtifactInfo> result = new ArrayList<>();
+        for (Node node : session.flattenDependencies(root, PathScope.TEST_RUNTIME)) {
+            org.apache.maven.api.Dependency dependency = node.getDependency();
+            if (dependency != null) {
+                String conflictId = dependency.getGroupId() + ":" + dependency.getArtifactId() + ":"
+                        + dependency.getType().id()
+                        + (dependency.getClassifier() != null
+                                        && !dependency.getClassifier().isEmpty()
+                                ? ":" + dependency.getClassifier()
+                                : "");
+                result.add(new ArtifactInfo(
+                        conflictId,
+                        dependency.getGroupId(),
+                        dependency.getArtifactId(),
+                        dependency.getVersion().toString(),
+                        dependency.getBaseVersion().toString()));
             }
         }
-        if (project.getBuild() != null) {
-            for (Plugin plugin : project.getBuild().getPlugins()) {
-                if (Objects.equals(artifact.getGroupId(), plugin.getGroupId())
-                        && Objects.equals(artifact.getArtifactId(), plugin.getArtifactId())
+        return result;
+    }
+
+    private List<ArtifactInfo> getPluginArtifacts() {
+        Build build = project.getModel().getBuild();
+        List<ArtifactInfo> result = new ArrayList<>();
+        if (build != null) {
+            for (Plugin plugin : build.getPlugins()) {
+                result.add(pluginArtifact(plugin.getGroupId(), plugin.getArtifactId(), plugin.getVersion()));
+            }
+        }
+        return result;
+    }
+
+    private List<ArtifactInfo> getReportArtifacts() {
+        Reporting reporting = project.getModel().getReporting();
+        List<ArtifactInfo> result = new ArrayList<>();
+        if (reporting != null) {
+            for (ReportPlugin plugin : reporting.getPlugins()) {
+                result.add(pluginArtifact(plugin.getGroupId(), plugin.getArtifactId(), plugin.getVersion()));
+            }
+        }
+        return result;
+    }
+
+    private static ArtifactInfo pluginArtifact(String groupId, String artifactId, String version) {
+        String v = version == null || version.isEmpty() ? "RELEASE" : version;
+        return new ArtifactInfo(groupId + ":" + artifactId + ":maven-plugin", groupId, artifactId, v, v);
+    }
+
+    private String getReportPluginVersion(ArtifactInfo artifact) {
+        Reporting reporting = project.getModel().getReporting();
+        if (reporting != null) {
+            for (ReportPlugin reportPlugin : reporting.getPlugins()) {
+                if (Objects.equals(artifact.groupId, reportPlugin.getGroupId())
+                        && Objects.equals(artifact.artifactId, reportPlugin.getArtifactId())
+                        && reportPlugin.getVersion() != null) {
+                    return reportPlugin.getVersion();
+                }
+            }
+        }
+        Build build = project.getModel().getBuild();
+        if (build != null) {
+            for (Plugin plugin : build.getPlugins()) {
+                if (Objects.equals(artifact.groupId, plugin.getGroupId())
+                        && Objects.equals(artifact.artifactId, plugin.getArtifactId())
                         && plugin.getVersion() != null) {
                     return plugin.getVersion();
                 }
             }
         }
-        PluginManagement pluginManagement =
-                project.getBuild() != null ? project.getBuild().getPluginManagement() : null;
+        PluginManagement pluginManagement = build != null ? build.getPluginManagement() : null;
 
         if (pluginManagement != null) {
             for (Plugin plugin : pluginManagement.getPlugins()) {
-                if (Objects.equals(artifact.getGroupId(), plugin.getGroupId())
-                        && Objects.equals(artifact.getArtifactId(), plugin.getArtifactId())
+                if (Objects.equals(artifact.groupId, plugin.getGroupId())
+                        && Objects.equals(artifact.artifactId, plugin.getArtifactId())
                         && plugin.getVersion() != null) {
                     return plugin.getVersion();
                 }
             }
         }
 
-        return uniqueVersions ? artifact.getVersion() : artifact.getBaseVersion();
+        return uniqueVersions ? artifact.version : artifact.baseVersion;
+    }
+
+    private static final class ArtifactInfo {
+        private final String conflictId;
+        private final String groupId;
+        private final String artifactId;
+        private final String version;
+        private final String baseVersion;
+
+        ArtifactInfo(String conflictId, String groupId, String artifactId, String version, String baseVersion) {
+            this.conflictId = conflictId;
+            this.groupId = groupId;
+            this.artifactId = artifactId;
+            this.version = version;
+            this.baseVersion = baseVersion;
+        }
     }
 
     void addDependency(String dependency) {

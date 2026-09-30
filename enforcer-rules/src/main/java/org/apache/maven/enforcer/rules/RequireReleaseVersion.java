@@ -18,14 +18,14 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.Objects;
 
-import org.apache.maven.artifact.Artifact;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Parent;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.project.MavenProject;
 
 /**
  * This rule checks that the current project is not a snapshot.
@@ -35,7 +35,9 @@ import org.apache.maven.project.MavenProject;
 @Named("requireReleaseVersion")
 public final class RequireReleaseVersion extends AbstractStandardEnforcerRule {
 
-    private final MavenProject project;
+    private final Project project;
+
+    private final VersionParser versionParser;
 
     /**
      * Allows this rule to fail when the parent is defined as a snapshot.
@@ -43,27 +45,28 @@ public final class RequireReleaseVersion extends AbstractStandardEnforcerRule {
     private boolean failWhenParentIsSnapshot = true;
 
     @Inject
-    public RequireReleaseVersion(MavenProject project) {
+    public RequireReleaseVersion(Project project, VersionParser versionParser) {
         this.project = Objects.requireNonNull(project);
+        this.versionParser = Objects.requireNonNull(versionParser);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
 
-        if (project.getArtifact().isSnapshot()) {
+        if (project.getPomArtifact().isSnapshot()) {
             String message = getMessage();
             StringBuilder buf = new StringBuilder();
             if (message != null) {
                 buf.append(message).append(System.lineSeparator());
             }
-            buf.append("This project cannot be a snapshot:")
-                    .append(project.getArtifact().getId());
+            buf.append("This project cannot be a snapshot:").append(project.getId());
             throw new EnforcerRuleException(buf.toString());
         }
         if (failWhenParentIsSnapshot) {
-            Artifact parentArtifact = project.getParentArtifact();
-            if (parentArtifact != null && parentArtifact.isSnapshot()) {
-                throw new EnforcerRuleException("Parent Cannot be a snapshot: " + parentArtifact.getId());
+            Parent parent = project.getModel().getParent();
+            if (parent != null && versionParser.isSnapshot(parent.getVersion())) {
+                throw new EnforcerRuleException("Parent Cannot be a snapshot: " + parent.getGroupId() + ":"
+                        + parent.getArtifactId() + ":pom:" + parent.getVersion());
             }
         }
     }

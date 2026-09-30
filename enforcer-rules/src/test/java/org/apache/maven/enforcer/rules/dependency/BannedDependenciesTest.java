@@ -21,13 +21,12 @@ package org.apache.maven.enforcer.rules.dependency;
 import java.util.Collections;
 
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
+import org.apache.maven.enforcer.rules.EnforcerTestUtils;
 import org.apache.maven.enforcer.rules.utils.DependencyNodeBuilder;
 import org.apache.maven.enforcer.rules.utils.EnforcerArtifactStubFactory;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.project.MavenProject;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -47,21 +46,19 @@ class BannedDependenciesTest {
     private static final EnforcerArtifactStubFactory ARTIFACT_STUB_FACTORY = new EnforcerArtifactStubFactory();
 
     @Mock
-    private MavenProject project;
-
-    @Mock
-    private MavenSession session;
-
-    @Mock
     private ResolverUtil resolverUtil;
 
-    @InjectMocks
     private BannedDependencies rule;
+
+    @BeforeEach
+    void setUp() {
+        rule = new BannedDependencies(resolverUtil, EnforcerTestUtils.getVersionParser());
+    }
 
     @Test
     void excludesDoNotUseTransitiveDependenciesNullSafe() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
-        when(project.getDependencyArtifacts()).thenReturn(ARTIFACT_STUB_FACTORY.getTypedArtifacts());
+        when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
+                .thenReturn(DependencyNodeBuilder.rootOf(ARTIFACT_STUB_FACTORY.getTypedArtifacts()));
 
         rule.setSearchTransitive(false);
         rule.setExcludes(Collections.singletonList("g:b:*:*:compile:*"));
@@ -73,8 +70,8 @@ class BannedDependenciesTest {
 
     @Test
     void excludesDoNotUseTransitiveDependencies() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
-        when(project.getDependencyArtifacts()).thenReturn(ARTIFACT_STUB_FACTORY.getScopedArtifacts());
+        when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
+                .thenReturn(DependencyNodeBuilder.rootOf(ARTIFACT_STUB_FACTORY.getScopedArtifacts()));
 
         rule.setSearchTransitive(false);
         rule.setExcludes(Collections.singletonList("*"));
@@ -90,8 +87,8 @@ class BannedDependenciesTest {
 
     @Test
     void excludesAndIncludesDoNotUseTransitiveDependencies() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
-        when(project.getDependencyArtifacts()).thenReturn(ARTIFACT_STUB_FACTORY.getScopedArtifacts());
+        when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
+                .thenReturn(DependencyNodeBuilder.rootOf(ARTIFACT_STUB_FACTORY.getScopedArtifacts()));
 
         rule.setSearchTransitive(false);
         rule.setExcludes(Collections.singletonList("*"));
@@ -111,17 +108,17 @@ class BannedDependenciesTest {
 
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(new DependencyNodeBuilder()
-                        .withType(DependencyNodeBuilder.Type.POM)
+                        .withType(DependencyNodeBuilder.NodeType.POM)
                         .withChildNode(new DependencyNodeBuilder()
                                 .withArtifactId("childA")
                                 .withVersion("1.0.0")
                                 .withChildNode(new DependencyNodeBuilder()
-                                        .withType(DependencyNodeBuilder.Type.WAR)
+                                        .withType(DependencyNodeBuilder.NodeType.WAR)
                                         .withArtifactId("childAA")
                                         .withVersion("1.0.0-SNAPSHOT")
                                         .build())
                                 .withChildNode(new DependencyNodeBuilder()
-                                        .withType(DependencyNodeBuilder.Type.WAR)
+                                        .withType(DependencyNodeBuilder.NodeType.WAR)
                                         .withArtifactId("childAB")
                                         .withVersion("1.0.0-SNAPSHOT")
                                         .build())
@@ -144,17 +141,17 @@ class BannedDependenciesTest {
 
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(new DependencyNodeBuilder()
-                        .withType(DependencyNodeBuilder.Type.POM)
+                        .withType(DependencyNodeBuilder.NodeType.POM)
                         .withChildNode(new DependencyNodeBuilder()
                                 .withArtifactId("childA")
                                 .withVersion("1.0.0")
                                 .withChildNode(new DependencyNodeBuilder()
-                                        .withType(DependencyNodeBuilder.Type.WAR)
+                                        .withType(DependencyNodeBuilder.NodeType.WAR)
                                         .withArtifactId("childAA")
                                         .withVersion("1.0.0-SNAPSHOT")
                                         .build())
                                 .withChildNode(new DependencyNodeBuilder()
-                                        .withType(DependencyNodeBuilder.Type.WAR)
+                                        .withType(DependencyNodeBuilder.NodeType.WAR)
                                         .withArtifactId("childAB")
                                         .withVersion("1.0.0-SNAPSHOT")
                                         .build())
@@ -177,16 +174,16 @@ class BannedDependenciesTest {
 
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(new DependencyNodeBuilder()
-                        .withType(DependencyNodeBuilder.Type.POM)
+                        .withType(DependencyNodeBuilder.NodeType.POM)
                         .withChildNode(new DependencyNodeBuilder()
                                 .withArtifactId("childA")
                                 .withVersion("1.0.0")
                                 .withChildNode(new DependencyNodeBuilder()
-                                        .withType(DependencyNodeBuilder.Type.WAR)
+                                        .withType(DependencyNodeBuilder.NodeType.WAR)
                                         .withArtifactId("childAA")
                                         .withVersion("1.0.0-SNAPSHOT")
                                         .withChildNode(new DependencyNodeBuilder()
-                                                .withType(DependencyNodeBuilder.Type.WAR)
+                                                .withType(DependencyNodeBuilder.NodeType.WAR)
                                                 .withArtifactId("childAAA")
                                                 .withVersion("1.0.0-SNAPSHOT")
                                                 .build())

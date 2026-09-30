@@ -19,39 +19,44 @@
 package org.apache.maven.enforcer.rules.utils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Predicate;
 
-import org.apache.maven.RepositoryUtils;
-import org.apache.maven.artifact.handler.DefaultArtifactHandler;
-import org.eclipse.aether.artifact.Artifact;
-import org.eclipse.aether.artifact.ArtifactType;
-import org.eclipse.aether.artifact.DefaultArtifact;
-import org.eclipse.aether.graph.DefaultDependencyNode;
-import org.eclipse.aether.graph.Dependency;
-import org.eclipse.aether.graph.DependencyNode;
-import org.eclipse.aether.util.graph.manager.DependencyManagerUtils;
+import org.apache.maven.api.Artifact;
+import org.apache.maven.api.Dependency;
+import org.apache.maven.api.DependencyCoordinates;
+import org.apache.maven.api.DependencyScope;
+import org.apache.maven.api.Language;
+import org.apache.maven.api.Node;
+import org.apache.maven.api.NodeVisitor;
+import org.apache.maven.api.PathType;
+import org.apache.maven.api.RemoteRepository;
+import org.apache.maven.api.Type;
+import org.apache.maven.api.Version;
+import org.apache.maven.enforcer.rules.EnforcerTestUtils;
 
 import static java.util.Optional.ofNullable;
-import static org.apache.maven.artifact.Artifact.SCOPE_COMPILE;
 
+/**
+ * Builds the nodes of the dependency tree. The Maven 4 API has no public implementation of the nodes.
+ */
 public class DependencyNodeBuilder {
-    public enum Type {
-        WAR(RepositoryUtils.newArtifactType("war", new DefaultArtifactHandler("war"))),
-        JAR(RepositoryUtils.newArtifactType("jar", new DefaultArtifactHandler("jar"))),
-        POM(RepositoryUtils.newArtifactType("pom", new DefaultArtifactHandler("pom")));
 
-        private final ArtifactType artifactType;
+    public enum NodeType {
+        WAR("war"),
+        JAR("jar"),
+        POM("pom");
 
-        Type(ArtifactType artifactType) {
-            this.artifactType = artifactType;
-        }
+        private final String id;
 
-        ArtifactType asArtifactType() {
-            return artifactType;
+        NodeType(String id) {
+            this.id = id;
         }
 
         String asString() {
-            return name().toLowerCase();
+            return id;
         }
     }
 
@@ -61,15 +66,15 @@ public class DependencyNodeBuilder {
 
     private String version;
 
-    private String premanagedVersion;
-
-    private Type type;
+    private NodeType type;
 
     private String scope;
 
     private boolean optional;
 
-    private List<DependencyNode> children = new ArrayList<>();
+    private String classifier = "classifier";
+
+    private final List<Node> children = new ArrayList<>();
 
     public DependencyNodeBuilder withGroupId(String val) {
         groupId = val;
@@ -86,12 +91,7 @@ public class DependencyNodeBuilder {
         return this;
     }
 
-    public DependencyNodeBuilder withPremanagedVersion(String val) {
-        premanagedVersion = val;
-        return this;
-    }
-
-    public DependencyNodeBuilder withType(Type val) {
+    public DependencyNodeBuilder withType(NodeType val) {
         type = val;
         return this;
     }
@@ -106,30 +106,235 @@ public class DependencyNodeBuilder {
         return this;
     }
 
-    public DependencyNodeBuilder withChildNode(DependencyNode val) {
+    public DependencyNodeBuilder withClassifier(String val) {
+        classifier = val;
+        return this;
+    }
+
+    public DependencyNodeBuilder withChildNode(Node val) {
         children.add(val);
         return this;
     }
 
-    public DependencyNode build() {
-        Artifact artifact = new DefaultArtifact(
+    public Node build() {
+        StubDependency dependency = new StubDependency(
                 ofNullable(groupId).orElse("default-group"),
                 ofNullable(artifactId).orElse("default-artifact"),
-                "classifier",
-                ofNullable(type).map(Type::asString).orElse("pom"),
                 ofNullable(version).orElse("default-version"),
-                ofNullable(type).orElse(Type.JAR).asArtifactType());
+                classifier,
+                ofNullable(type).map(NodeType::asString).orElse("jar"),
+                ofNullable(scope).orElse("compile"),
+                optional);
+        return new StubNode(dependency, children);
+    }
 
-        Dependency dependency = new Dependency(artifact, ofNullable(scope).orElse(SCOPE_COMPILE), optional);
+    /**
+     * Creates a dependency of a node.
+     */
+    public static Dependency dependency(
+            String groupId, String artifactId, String version, String scope, String type, String classifier) {
+        return new StubDependency(groupId, artifactId, version, classifier, type, scope, false);
+    }
 
-        DefaultDependencyNode instance = new DefaultDependencyNode(dependency);
+    /**
+     * Creates a root node with the dependencies as its children.
+     */
+    public static Node rootOf(List<Dependency> dependencies) {
+        List<Node> children = new ArrayList<>();
+        for (Dependency dependency : dependencies) {
+            children.add(node(dependency));
+        }
+        return new StubNode(dependency("default-group", "root", "1.0", "compile", "pom", ""), children);
+    }
 
-        if (premanagedVersion != null) {
-            instance.setData(DependencyManagerUtils.NODE_DATA_PREMANAGED_VERSION, premanagedVersion);
-            instance.setManagedBits(DependencyNode.MANAGED_VERSION);
+    public static Node node(Dependency dependency) {
+        return new StubNode(dependency, Collections.emptyList());
+    }
+
+    private static final class StubType implements Type {
+        private final String id;
+
+        StubType(String id) {
+            this.id = id;
         }
 
-        instance.setChildren(children);
-        return instance;
+        @Override
+        public String id() {
+            return id;
+        }
+
+        @Override
+        public Language getLanguage() {
+            return null;
+        }
+
+        @Override
+        public String getExtension() {
+            return id;
+        }
+
+        @Override
+        public String getClassifier() {
+            return null;
+        }
+
+        @Override
+        public boolean isIncludesDependencies() {
+            return false;
+        }
+
+        @Override
+        public java.util.Set<PathType> getPathTypes() {
+            return Collections.emptySet();
+        }
+    }
+
+    private static final class StubDependency implements Dependency {
+        private final String groupId;
+        private final String artifactId;
+        private final Version version;
+        private final String classifier;
+        private final Type type;
+        private final DependencyScope scope;
+        private final boolean optional;
+
+        StubDependency(
+                String groupId,
+                String artifactId,
+                String version,
+                String classifier,
+                String type,
+                String scope,
+                boolean optional) {
+            this.groupId = groupId;
+            this.artifactId = artifactId;
+            this.version = EnforcerTestUtils.getVersionParser().parseVersion(version);
+            this.classifier = classifier;
+            this.type = new StubType(type);
+            this.scope = DependencyScope.forId(scope);
+            this.optional = optional;
+        }
+
+        @Override
+        public Type getType() {
+            return type;
+        }
+
+        @Override
+        public DependencyScope getScope() {
+            return scope;
+        }
+
+        @Override
+        public boolean isOptional() {
+            return optional;
+        }
+
+        @Override
+        public DependencyCoordinates toCoordinates() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String getGroupId() {
+            return groupId;
+        }
+
+        @Override
+        public String getArtifactId() {
+            return artifactId;
+        }
+
+        @Override
+        public Version getVersion() {
+            return version;
+        }
+
+        @Override
+        public Version getBaseVersion() {
+            return version;
+        }
+
+        @Override
+        public String getClassifier() {
+            return classifier;
+        }
+
+        @Override
+        public String getExtension() {
+            return type.getExtension();
+        }
+
+        @Override
+        public boolean isSnapshot() {
+            return EnforcerTestUtils.getVersionParser().isSnapshot(version.toString());
+        }
+
+        @Override
+        public String toString() {
+            return groupId + ":" + artifactId + ":" + type.id() + ":" + version + ":" + scope.id();
+        }
+    }
+
+    private static final class StubNode implements Node {
+        private final Dependency dependency;
+        private final List<Node> children;
+
+        StubNode(Dependency dependency, List<Node> children) {
+            this.dependency = dependency;
+            this.children = new ArrayList<>(children);
+        }
+
+        @Override
+        public Artifact getArtifact() {
+            return dependency;
+        }
+
+        @Override
+        public Dependency getDependency() {
+            return dependency;
+        }
+
+        @Override
+        public List<Node> getChildren() {
+            return children;
+        }
+
+        @Override
+        public List<RemoteRepository> getRemoteRepositories() {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public Optional<RemoteRepository> getRepository() {
+            return Optional.empty();
+        }
+
+        @Override
+        public boolean accept(NodeVisitor visitor) {
+            if (visitor.enter(this)) {
+                for (Node child : children) {
+                    if (!child.accept(visitor)) {
+                        break;
+                    }
+                }
+            }
+            return visitor.leave(this);
+        }
+
+        @Override
+        public Node filter(Predicate<Node> filter) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String asString() {
+            return dependency.toString();
+        }
+
+        @Override
+        public String toString() {
+            return asString();
+        }
     }
 }
