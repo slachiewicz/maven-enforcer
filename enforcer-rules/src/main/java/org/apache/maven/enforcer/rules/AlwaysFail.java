@@ -18,8 +18,7 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Named;
-
+import org.apache.maven.api.di.Named;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 
 /**

@@ -18,12 +18,14 @@
  */
 package org.apache.maven.enforcer.rules;
 
+import java.util.Arrays;
 import java.util.Collections;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.Dependency;
+import org.apache.maven.api.model.DependencyManagement;
+import org.apache.maven.api.services.xml.ModelXmlFactory;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
-import org.apache.maven.model.Dependency;
-import org.apache.maven.model.DependencyManagement;
-import org.apache.maven.project.MavenProject;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertIterableEquals;
@@ -32,16 +34,16 @@ import static org.mockito.Mockito.mock;
 class BanDependencyManagementScopeTest {
     @Test
     void testGetViolatingDependencies() {
-        BanDependencyManagementScope rule = new BanDependencyManagementScope(new MavenProject());
-        DependencyManagement depMgmt = new DependencyManagement();
+        BanDependencyManagementScope rule = new BanDependencyManagementScope(
+                mock(Project.class), mock(ModelXmlFactory.class), EnforcerTestUtils.getVersionParser());
+
         Dependency depWithoutScope = createDependency("myGroup", "artifact1", null);
         Dependency depWithScope = createDependency("myGroup", "artifact2", "1.1.0", "provided");
         Dependency depWithImportScope = createDependency("myGroup", "artifact3", "1.1.0", "import");
         Dependency excludedDepWithScope = createDependency("myGroup", "artifact4", "1.1.0", "provided");
-        depMgmt.addDependency(depWithoutScope);
-        depMgmt.addDependency(depWithScope);
-        depMgmt.addDependency(depWithImportScope);
-        depMgmt.addDependency(excludedDepWithScope);
+        DependencyManagement depMgmt = DependencyManagement.newBuilder()
+                .dependencies(Arrays.asList(depWithoutScope, depWithScope, depWithImportScope, excludedDepWithScope))
+                .build();
         rule.setExcludes(Collections.singletonList("*:artifact4"));
         rule.setLog(mock(EnforcerLogger.class));
         assertIterableEquals(Collections.singletonList(depWithScope), rule.getViolatingDependencies(depMgmt));
@@ -52,15 +54,13 @@ class BanDependencyManagementScopeTest {
     }
 
     static Dependency createDependency(String groupId, String artifactId, String version, String scope) {
-        Dependency dependency = new Dependency();
-        dependency.setGroupId(groupId);
-        dependency.setArtifactId(artifactId);
+        Dependency.Builder dependency = Dependency.newBuilder().groupId(groupId).artifactId(artifactId);
         if (version != null) {
-            dependency.setVersion(version);
+            dependency.version(version);
         }
         if (scope != null) {
-            dependency.setScope(scope);
+            dependency.scope(scope);
         }
-        return dependency;
+        return dependency.build();
     }
 }

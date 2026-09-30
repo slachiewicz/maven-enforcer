@@ -18,21 +18,25 @@
  */
 package org.apache.maven.enforcer.rules;
 
+import java.util.Optional;
+
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.DeploymentRepository;
+import org.apache.maven.api.model.DistributionManagement;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.services.xml.ModelXmlFactory;
+import org.apache.maven.api.services.xml.XmlReaderRequest;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.model.DeploymentRepository;
-import org.apache.maven.model.DistributionManagement;
-import org.apache.maven.model.Model;
-import org.apache.maven.project.MavenProject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -44,17 +48,20 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class BanDistributionManagementTest {
 
-    @Mock
-    private MavenProject project;
+    private Project project;
 
     @Mock
     private EnforcerLogger log;
 
-    @InjectMocks
+    private ModelXmlFactory modelXmlFactory;
+
     private BanDistributionManagement rule;
 
     @BeforeEach
     void setup() {
+        project = EnforcerTestUtils.mockProject();
+        modelXmlFactory = mock(ModelXmlFactory.class);
+        rule = new BanDistributionManagement(project, modelXmlFactory);
         rule.setLog(log);
     }
 
@@ -76,7 +83,7 @@ class BanDistributionManagementTest {
      */
     @Test
     void shouldThrowExceptionIfDistributionManagementIsDefinedWithRepository() {
-        setupProjectWithDistributionManagement(new DeploymentRepository(), null);
+        setupProjectWithDistributionManagement(DeploymentRepository.newInstance(), null);
         assertThrows(EnforcerRuleException.class, () -> rule.execute());
     }
 
@@ -91,7 +98,7 @@ class BanDistributionManagementTest {
      */
     @Test
     void shouldThrowExceptionIfDistributionManagementIsDefinedWithRepositorySnapshotRepository() {
-        setupProjectWithDistributionManagement(null, new DeploymentRepository());
+        setupProjectWithDistributionManagement(null, DeploymentRepository.newInstance());
 
         assertThrows(EnforcerRuleException.class, () -> rule.execute());
     }
@@ -113,7 +120,7 @@ class BanDistributionManagementTest {
      */
     @Test
     void shouldThrowExceptionIfDistributionManagementIsDefinedWithRepositorySnapshotRepositorySite() {
-        setupProjectWithDistributionManagement(new DeploymentRepository(), null);
+        setupProjectWithDistributionManagement(DeploymentRepository.newInstance(), null);
 
         assertThrows(EnforcerRuleException.class, () -> rule.execute());
     }
@@ -192,7 +199,7 @@ class BanDistributionManagementTest {
     void shouldOutputCustomMessageWhenBanned() {
         String customMessage = "Custom distribution management message";
         rule.setMessage(customMessage);
-        setupProjectWithDistributionManagement(new DeploymentRepository(), null);
+        setupProjectWithDistributionManagement(DeploymentRepository.newInstance(), null);
 
         assertThatThrownBy(() -> rule.execute())
                 .isInstanceOf(EnforcerRuleException.class)
@@ -206,23 +213,20 @@ class BanDistributionManagementTest {
 
     private void setupProjectWithDistributionManagement(
             DeploymentRepository repository, DeploymentRepository snapshotRepository) {
-        DistributionManagement dm = mock(DistributionManagement.class);
-        if (repository != null) {
-            when(dm.getRepository()).thenReturn(repository);
-        }
-        if (snapshotRepository != null) {
-            when(dm.getSnapshotRepository()).thenReturn(snapshotRepository);
-        }
+        DistributionManagement dm = DistributionManagement.newBuilder()
+                .repository(repository)
+                .snapshotRepository(snapshotRepository)
+                .build();
         setupProject(dm);
 
-        when(project.getParent()).thenReturn(mock(MavenProject.class));
-        when(project.isExecutionRoot()).thenReturn(true);
+        when(project.getParent()).thenReturn(Optional.of(mock(Project.class)));
+        when(project.isTopProject()).thenReturn(true);
     }
 
     private void setupProject(DistributionManagement distributionManagement) {
-        //        when(project.getPackaging()).thenReturn("jar");
-        Model mavenModel = mock(Model.class);
-        when(project.getOriginalModel()).thenReturn(mavenModel);
-        when(mavenModel.getDistributionManagement()).thenReturn(distributionManagement);
+        Model model = Model.newBuilder()
+                .distributionManagement(distributionManagement)
+                .build();
+        when(modelXmlFactory.read(any(XmlReaderRequest.class))).thenReturn(model);
     }
 }

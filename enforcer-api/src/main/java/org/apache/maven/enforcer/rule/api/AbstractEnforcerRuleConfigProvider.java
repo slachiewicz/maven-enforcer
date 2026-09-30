@@ -18,7 +18,7 @@
  */
 package org.apache.maven.enforcer.rule.api;
 
-import org.codehaus.plexus.util.xml.Xpp3Dom;
+import org.apache.maven.api.xml.XmlNode;
 
 /**
  * Entry point for custom {@code Enforcer Rule} which provide additional rules configuration.
@@ -46,5 +46,5 @@ public abstract class AbstractEnforcerRuleConfigProvider extends AbstractEnforce
      * @return a rules configuration
      * @throws EnforcerRuleError the error during executing
      */
-    public abstract Xpp3Dom getRulesConfig() throws EnforcerRuleError;
+    public abstract XmlNode getRulesConfig() throws EnforcerRuleError;
 }

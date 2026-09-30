@@ -18,9 +18,12 @@
  */
 package org.apache.maven.enforcer.rules.version;
 
-import org.apache.maven.artifact.versioning.ArtifactVersion;
-import org.apache.maven.artifact.versioning.InvalidVersionSpecificationException;
-import org.apache.maven.artifact.versioning.VersionRange;
+import java.util.Objects;
+
+import org.apache.maven.api.Version;
+import org.apache.maven.api.VersionConstraint;
+import org.apache.maven.api.services.VersionParser;
+import org.apache.maven.api.services.VersionParserException;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.AbstractStandardEnforcerRule;
 
@@ -46,7 +49,17 @@ abstract class AbstractVersionEnforcer extends AbstractStandardEnforcerRule {
      * @see {@link #setVersion(String)}
      * @see {@link #getVersion()}
      */
+    private final VersionParser versionParser;
+
     private String version;
+
+    protected AbstractVersionEnforcer(VersionParser versionParser) {
+        this.versionParser = Objects.requireNonNull(versionParser);
+    }
+
+    protected VersionParser getVersionParser() {
+        return versionParser;
+    }
 
     /**
      * Compares the specified version to see if it is allowed by the defined version range.
@@ -57,7 +70,7 @@ abstract class AbstractVersionEnforcer extends AbstractStandardEnforcerRule {
      * @throws EnforcerRuleException the enforcer rule exception
      */
     // CHECKSTYLE_OFF: LineLength
-    public void enforceVersion(String variableName, String requiredVersionRange, ArtifactVersion actualVersion)
+    public void enforceVersion(String variableName, String requiredVersionRange, Version actualVersion)
             throws EnforcerRuleException
                 // CHECKSTYLE_ON: LineLength
             {
@@ -72,7 +85,7 @@ abstract class AbstractVersionEnforcer extends AbstractStandardEnforcerRule {
                 getLog().debug(msg + " is allowed in the range " + requiredVersionRange + ".");
             } else {
                 try {
-                    VersionRange versionRange = VersionRange.createFromVersionSpec(requiredVersionRange);
+                    VersionConstraint versionRange = versionParser.parseVersionConstraint(requiredVersionRange);
 
                     if (containsVersion(versionRange, actualVersion)) {
                         getLog().debug(msg + " is allowed in the range " + toString(versionRange) + ".");
@@ -85,7 +98,7 @@ abstract class AbstractVersionEnforcer extends AbstractStandardEnforcerRule {
 
                         throw new EnforcerRuleException(message);
                     }
-                } catch (InvalidVersionSpecificationException e) {
+                } catch (VersionParserException e) {
                     throw new EnforcerRuleException(
                             "The requested " + variableName + " version " + requiredVersionRange + " is invalid.", e);
                 }
@@ -93,9 +106,9 @@ abstract class AbstractVersionEnforcer extends AbstractStandardEnforcerRule {
         }
     }
 
-    protected static String toString(VersionRange versionRange) {
+    protected static String toString(VersionConstraint versionRange) {
         // as recommended version is used as lower bound in this context modify the string representation
-        if (versionRange.getRecommendedVersion() != null) {
+        if (versionRange.getVersionRange() == null && versionRange.getRecommendedVersion() != null) {
             return "[" + versionRange.getRecommendedVersion().toString() + ",)";
         } else {
             return versionRange.toString();

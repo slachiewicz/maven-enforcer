@@ -18,11 +18,6 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
-import java.io.FileInputStream;
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -30,14 +25,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-import org.apache.maven.enforcer.rule.api.EnforcerRuleError;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Dependency;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.Profile;
+import org.apache.maven.api.services.xml.ModelXmlFactory;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.model.Dependency;
-import org.apache.maven.model.Model;
-import org.apache.maven.model.Profile;
-import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
-import org.apache.maven.project.MavenProject;
-import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
+import org.apache.maven.enforcer.rules.utils.OriginalModels;
 
 /**
  * Since Maven 3 'dependencies.dependency.(groupId:artifactId:type:classifier)' must be unique. Early versions of Maven
@@ -50,25 +46,21 @@ import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 @Named("banDuplicatePomDependencyVersions")
 public final class BanDuplicatePomDependencyVersions extends AbstractStandardEnforcerRule {
 
-    private final MavenProject project;
+    private final Project project;
+
+    private final ModelXmlFactory modelXmlFactory;
 
     @Inject
-    public BanDuplicatePomDependencyVersions(MavenProject project) {
+    public BanDuplicatePomDependencyVersions(Project project, ModelXmlFactory modelXmlFactory) {
         this.project = Objects.requireNonNull(project);
+        this.modelXmlFactory = Objects.requireNonNull(modelXmlFactory);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
 
-        // re-read model, because M3 uses optimized model
-        MavenXpp3Reader modelReader = new MavenXpp3Reader();
-
-        try (FileInputStream pomInputStream = new FileInputStream(project.getFile())) {
-            Model model = modelReader.read(pomInputStream, false);
-            maven2Validation(model);
-        } catch (IOException | XmlPullParserException e) {
-            throw new EnforcerRuleError("Unable to retrieve the MavenProject: ", e);
-        }
+        // re-read model, because the effective model is not what is written in the pom
+        maven2Validation(OriginalModels.read(modelXmlFactory, project));
     }
 
     private void maven2Validation(Model model) throws EnforcerRuleException {

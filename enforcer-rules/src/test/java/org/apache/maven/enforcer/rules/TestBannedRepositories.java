@@ -21,10 +21,11 @@ package org.apache.maven.enforcer.rules;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.RemoteRepository;
+import org.apache.maven.api.services.ProjectManager;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.project.MavenProject;
-import org.eclipse.aether.repository.RemoteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +35,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.fail;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -46,10 +48,20 @@ import static org.mockito.Mockito.when;
 class TestBannedRepositories {
 
     @Mock
-    private MavenProject project;
+    private Project project;
+
+    @Mock
+    private ProjectManager projectManager;
 
     @InjectMocks
     private BannedRepositories rule;
+
+    private static RemoteRepository repository(String id, String url) {
+        RemoteRepository repository = mock(RemoteRepository.class);
+        lenient().when(repository.getId()).thenReturn(id);
+        lenient().when(repository.getUrl()).thenReturn(url);
+        return repository;
+    }
 
     @BeforeEach
     public void setUp() {
@@ -58,28 +70,28 @@ class TestBannedRepositories {
 
     @Test
     void testNoCheckRules() throws EnforcerRuleException {
-        RemoteRepository repo1 = new RemoteRepository.Builder("repo1", "default", "http://repo1/").build();
+        RemoteRepository repo1 = repository("repo1", "http://repo1/");
         List<RemoteRepository> repos = new ArrayList<>();
         repos.add(repo1);
 
-        when(project.getRemoteProjectRepositories()).thenReturn(repos);
-        when(project.getRemotePluginRepositories()).thenReturn(repos);
+        when(projectManager.getRemoteProjectRepositories(project)).thenReturn(repos);
+        when(projectManager.getRemotePluginRepositories(project)).thenReturn(repos);
 
         rule.execute();
     }
 
     @Test
     void testBannedRepositories() {
-        RemoteRepository repo1 = new RemoteRepository.Builder("repo1", "default", "http://repo1/").build();
-        RemoteRepository repo2 = new RemoteRepository.Builder("repo1", "default", "http://repo1/test").build();
-        RemoteRepository repo3 = new RemoteRepository.Builder("repo1", "default", "http://repo2/test").build();
+        RemoteRepository repo1 = repository("repo1", "http://repo1/");
+        RemoteRepository repo2 = repository("repo1", "http://repo1/test");
+        RemoteRepository repo3 = repository("repo1", "http://repo2/test");
         List<RemoteRepository> repos = new ArrayList<>();
         repos.add(repo1);
         repos.add(repo2);
         repos.add(repo3);
 
-        when(project.getRemoteProjectRepositories()).thenReturn(repos);
-        when(project.getRemotePluginRepositories()).thenReturn(repos);
+        when(projectManager.getRemoteProjectRepositories(project)).thenReturn(repos);
+        when(projectManager.getRemotePluginRepositories(project)).thenReturn(repos);
 
         List<String> bannedRepositories = new ArrayList<>();
         String pattern1 = "http://repo1/*";
@@ -97,15 +109,15 @@ class TestBannedRepositories {
 
     @Test
     void testAllowedRepositoriesAllOK() throws EnforcerRuleException {
-        RemoteRepository repo1 = new RemoteRepository.Builder("repo1", "default", "http://repo1/").build();
-        RemoteRepository repo2 = new RemoteRepository.Builder("repo1", "default", "http://repo1/test").build();
+        RemoteRepository repo1 = repository("repo1", "http://repo1/");
+        RemoteRepository repo2 = repository("repo1", "http://repo1/test");
 
         List<RemoteRepository> repos = new ArrayList<>();
         repos.add(repo1);
         repos.add(repo2);
 
-        when(project.getRemoteProjectRepositories()).thenReturn(repos);
-        when(project.getRemotePluginRepositories()).thenReturn(repos);
+        when(projectManager.getRemoteProjectRepositories(project)).thenReturn(repos);
+        when(projectManager.getRemotePluginRepositories(project)).thenReturn(repos);
 
         List<String> bannedRepositories = new ArrayList<>();
         String pattern1 = "http://repo1/*";
@@ -120,16 +132,16 @@ class TestBannedRepositories {
 
     @Test
     void testAllowedRepositoriesException() {
-        RemoteRepository repo1 = new RemoteRepository.Builder("repo1", "default", "http://repo1/").build();
-        RemoteRepository repo2 = new RemoteRepository.Builder("repo1", "default", "http://repo1/test").build();
-        RemoteRepository repo3 = new RemoteRepository.Builder("repo1", "default", "http://repo2/test").build();
+        RemoteRepository repo1 = repository("repo1", "http://repo1/");
+        RemoteRepository repo2 = repository("repo1", "http://repo1/test");
+        RemoteRepository repo3 = repository("repo1", "http://repo2/test");
         List<RemoteRepository> repos = new ArrayList<>();
         repos.add(repo1);
         repos.add(repo2);
         repos.add(repo3);
 
-        when(project.getRemoteProjectRepositories()).thenReturn(repos);
-        when(project.getRemotePluginRepositories()).thenReturn(repos);
+        when(projectManager.getRemoteProjectRepositories(project)).thenReturn(repos);
+        when(projectManager.getRemotePluginRepositories(project)).thenReturn(repos);
 
         List<String> patterns = new ArrayList<>();
         String pattern1 = "http://repo1/*";
@@ -151,12 +163,12 @@ class TestBannedRepositories {
         String customMessage = "Custom banned repositories message";
         rule.setMessage(customMessage);
 
-        RemoteRepository repo1 = new RemoteRepository.Builder("repo1", "default", "http://repo1/").build();
+        RemoteRepository repo1 = repository("repo1", "http://repo1/");
         List<RemoteRepository> repos = new ArrayList<>();
         repos.add(repo1);
 
-        when(project.getRemoteProjectRepositories()).thenReturn(repos);
-        when(project.getRemotePluginRepositories()).thenReturn(repos);
+        when(projectManager.getRemoteProjectRepositories(project)).thenReturn(repos);
+        when(projectManager.getRemotePluginRepositories(project)).thenReturn(repos);
 
         List<String> bannedRepositories = new ArrayList<>();
         bannedRepositories.add("http://repo1/*");

@@ -18,9 +18,9 @@
  */
 package org.apache.maven.enforcer.rules;
 
+import org.apache.maven.api.Project;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.project.MavenProject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
 class TestRequireMatchingCoordinates {
 
     @Mock
-    private MavenProject project;
+    private Project project;
 
     private RequireMatchingCoordinates rule;
 

@@ -18,450 +18,490 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
-import org.apache.maven.artifact.Artifact;
+import org.apache.maven.api.Node;
+import org.apache.maven.api.PathScope;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.model.Build;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.Plugin;
+import org.apache.maven.api.model.PluginManagement;
+import org.apache.maven.api.model.ReportPlugin;
+import org.apache.maven.api.model.Reporting;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.enforcer.rules.utils.EnforcerArtifactStubFactory;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.model.Build;
-import org.apache.maven.model.Plugin;
-import org.apache.maven.model.PluginManagement;
-import org.apache.maven.project.MavenProject;
+import org.apache.maven.enforcer.rules.utils.DependencyNodeBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/**
- * The Class TestRequireSameVersions.
- *
- * @author <a href="mailto:brianf@apache.org">Brian Fox</a>
- */
 class TestRequireSameVersions {
-    private static final EnforcerArtifactStubFactory ARTIFACT_FACTORY = new EnforcerArtifactStubFactory();
 
-    private MavenProject project;
+    private Project project;
+
+    private Session session;
+
     private RequireSameVersions rule;
+
+    private Set<TestArtifact> deps = new HashSet<>();
+
+    private Set<TestArtifact> plugins = new HashSet<>();
+
+    private Set<TestArtifact> reports = new HashSet<>();
+
+    // the plugins management and the plugins of the build which are not the plugin artifacts
+    private Build build;
 
     @BeforeEach
     void setup() {
-        project = mock(MavenProject.class);
-        rule = new RequireSameVersions(project, mock(MavenSession.class));
+        project = mock(Project.class);
+        session = mock(Session.class);
+        rule = new RequireSameVersions(project, session);
+    }
+
+    /**
+     * Sets up the model of the project and the dependencies with the artifacts and executes the rule.
+     */
+    private void execute() throws EnforcerRuleException {
+        Node root = mock(Node.class);
+        when(session.collectDependencies(eq(project), any(PathScope.class))).thenReturn(root);
+        List<Node> nodes = new ArrayList<>();
+        for (TestArtifact dep : deps) {
+            nodes.add(DependencyNodeBuilder.node(
+                    DependencyNodeBuilder.dependency(dep.groupId, dep.artifactId, dep.version, "compile", "jar", "")));
+        }
+        when(session.flattenDependencies(eq(root), any(PathScope.class))).thenReturn(nodes);
+
+        List<Plugin> buildPlugins = new ArrayList<>();
+        for (TestArtifact plugin : plugins) {
+            buildPlugins.add(Plugin.newBuilder()
+                    .groupId(plugin.groupId)
+                    .artifactId(plugin.artifactId)
+                    .version(plugin.version)
+                    .build());
+        }
+        if (build != null) {
+            buildPlugins.addAll(build.getPlugins());
+        }
+        List<ReportPlugin> reportPlugins = new ArrayList<>();
+        for (TestArtifact report : reports) {
+            reportPlugins.add(ReportPlugin.newBuilder()
+                    .groupId(report.groupId)
+                    .artifactId(report.artifactId)
+                    .version(report.version.equals("RELEASE") ? null : report.version)
+                    .build());
+        }
+        Model model = Model.newBuilder()
+                .build(Build.newBuilder()
+                        .plugins(buildPlugins)
+                        .pluginManagement(build != null ? build.getPluginManagement() : null)
+                        .build())
+                .reporting(Reporting.newBuilder().plugins(reportPlugins).build())
+                .build();
+        when(project.getModel()).thenReturn(model);
+
+        rule.execute();
     }
 
     @Test
-    void testProjectWithSameVersionsInBuildAndReport() throws IOException {
+    void testProjectWithSameVersionsInBuildAndReport() {
         String version = "1.0.0";
-        Artifact dependency = constructArtifact("acme-dependency", version);
-        Artifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
-        Artifact buildPluginTwo = constructArtifact("acme-build-plugin-two", version);
-        Artifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
-        Artifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
+        TestArtifact dependency = constructArtifact("acme-dependency", version);
+        TestArtifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
+        TestArtifact buildPluginTwo = constructArtifact("acme-build-plugin-two", version);
+        TestArtifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
+        TestArtifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
         rule.addDependency(extractGaString(dependency));
         rule.addBuildPlugin(extractGaString(buildPluginOne));
         rule.addBuildPlugin(extractGaString(buildPluginTwo));
         rule.addReportPlugin(extractGaString(reportPluginOne));
         rule.addReportPlugin(extractGaString(reportPluginTwo));
 
-        HashSet<Artifact> dependencies = new HashSet<>();
+        HashSet<TestArtifact> dependencies = new HashSet<>();
         dependencies.add(dependency);
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
+        HashSet<TestArtifact> pluginArtifacts = new HashSet<>();
         pluginArtifacts.add(buildPluginOne);
         pluginArtifacts.add(buildPluginTwo);
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
+        HashSet<TestArtifact> reportArtifacts = new HashSet<>();
         reportArtifacts.add(reportPluginOne);
         reportArtifacts.add(reportPluginTwo);
-        when(project.getArtifacts()).thenReturn(dependencies);
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        deps = dependencies;
+        plugins = pluginArtifacts;
+        reports = reportArtifacts;
 
-        assertThatCode(rule::execute).doesNotThrowAnyException();
+        assertThatCode(this::execute).doesNotThrowAnyException();
     }
 
     @Test
-    void testProjectWithSameVersionsInPlugins() throws IOException {
+    void testProjectWithSameVersionsInPlugins() {
         String version = "1.0.0";
-        Artifact dependency = constructArtifact("acme-dependency", version);
-        Artifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
-        Artifact buildPluginTwo = constructArtifact("acme-build-plugin-two", version);
-        Artifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
-        Artifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
+        TestArtifact dependency = constructArtifact("acme-dependency", version);
+        TestArtifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
+        TestArtifact buildPluginTwo = constructArtifact("acme-build-plugin-two", version);
+        TestArtifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
+        TestArtifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
         rule.addDependency(extractGaString(dependency));
         rule.addPlugin(extractGaString(buildPluginOne));
         rule.addPlugin(extractGaString(buildPluginTwo));
         rule.addPlugin(extractGaString(reportPluginOne));
         rule.addPlugin(extractGaString(reportPluginTwo));
 
-        HashSet<Artifact> dependencies = new HashSet<>();
+        HashSet<TestArtifact> dependencies = new HashSet<>();
         dependencies.add(dependency);
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
+        HashSet<TestArtifact> pluginArtifacts = new HashSet<>();
         pluginArtifacts.add(buildPluginOne);
         pluginArtifacts.add(buildPluginTwo);
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
+        HashSet<TestArtifact> reportArtifacts = new HashSet<>();
         reportArtifacts.add(reportPluginOne);
         reportArtifacts.add(reportPluginTwo);
-        when(project.getArtifacts()).thenReturn(dependencies);
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        deps = dependencies;
+        plugins = pluginArtifacts;
+        reports = reportArtifacts;
 
-        assertThatCode(rule::execute).doesNotThrowAnyException();
+        assertThatCode(this::execute).doesNotThrowAnyException();
     }
 
     @Test
-    void testProjectWithSameVersionsInBuildAndReportAndPlugins() throws IOException {
+    void testProjectWithSameVersionsInBuildAndReportAndPlugins() {
         String version = "1.0.0";
-        Artifact dependency = constructArtifact("acme-dependency", version);
-        Artifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
-        Artifact buildPluginTwo = constructArtifact("acme-build-plugin-two", version);
-        Artifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
-        Artifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
+        TestArtifact dependency = constructArtifact("acme-dependency", version);
+        TestArtifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
+        TestArtifact buildPluginTwo = constructArtifact("acme-build-plugin-two", version);
+        TestArtifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
+        TestArtifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
         rule.addDependency(extractGaString(dependency));
         rule.addBuildPlugin(extractGaString(buildPluginOne));
         rule.addPlugin(extractGaString(buildPluginTwo));
         rule.addReportPlugin(extractGaString(reportPluginOne));
         rule.addPlugin(extractGaString(reportPluginTwo));
 
-        HashSet<Artifact> dependencies = new HashSet<>();
+        HashSet<TestArtifact> dependencies = new HashSet<>();
         dependencies.add(dependency);
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
+        HashSet<TestArtifact> pluginArtifacts = new HashSet<>();
         pluginArtifacts.add(buildPluginOne);
         pluginArtifacts.add(buildPluginTwo);
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
+        HashSet<TestArtifact> reportArtifacts = new HashSet<>();
         reportArtifacts.add(reportPluginOne);
         reportArtifacts.add(reportPluginTwo);
-        when(project.getArtifacts()).thenReturn(dependencies);
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        deps = dependencies;
+        plugins = pluginArtifacts;
+        reports = reportArtifacts;
 
-        assertThatCode(rule::execute).doesNotThrowAnyException();
+        assertThatCode(this::execute).doesNotThrowAnyException();
     }
 
     @Test
-    void testProjectWithDifferentPluginVersionsInBuildAndReport() throws IOException {
+    void testProjectWithDifferentPluginVersionsInBuildAndReport() {
         String version = "1.0.0";
-        Artifact dependency = constructArtifact("acme-dependency", version);
-        Artifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
-        Artifact buildPluginTwo = constructArtifact("acme-build-plugin-two", "1.0.1");
-        Artifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
-        Artifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
+        TestArtifact dependency = constructArtifact("acme-dependency", version);
+        TestArtifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
+        TestArtifact buildPluginTwo = constructArtifact("acme-build-plugin-two", "1.0.1");
+        TestArtifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
+        TestArtifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
         rule.addDependency(extractGaString(dependency));
         rule.addBuildPlugin(extractGaString(buildPluginOne));
         rule.addBuildPlugin(extractGaString(buildPluginTwo));
         rule.addReportPlugin(extractGaString(reportPluginOne));
         rule.addReportPlugin(extractGaString(reportPluginTwo));
 
-        HashSet<Artifact> dependencies = new HashSet<>();
+        HashSet<TestArtifact> dependencies = new HashSet<>();
         dependencies.add(dependency);
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
+        HashSet<TestArtifact> pluginArtifacts = new HashSet<>();
         pluginArtifacts.add(buildPluginOne);
         pluginArtifacts.add(buildPluginTwo);
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
+        HashSet<TestArtifact> reportArtifacts = new HashSet<>();
         reportArtifacts.add(reportPluginOne);
         reportArtifacts.add(reportPluginTwo);
-        when(project.getArtifacts()).thenReturn(dependencies);
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        deps = dependencies;
+        plugins = pluginArtifacts;
+        reports = reportArtifacts;
 
-        assertThatCode(rule::execute).isInstanceOf(EnforcerRuleException.class);
+        assertThatCode(this::execute).isInstanceOf(EnforcerRuleException.class);
     }
 
     @Test
-    void testProjectWithDifferentPluginVersionsInPlugins() throws IOException {
+    void testProjectWithDifferentPluginVersionsInPlugins() {
         String version = "1.0.0";
-        Artifact dependency = constructArtifact("acme-dependency", version);
-        Artifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
-        Artifact buildPluginTwo = constructArtifact("acme-build-plugin-two", "1.0.1");
-        Artifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
-        Artifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
+        TestArtifact dependency = constructArtifact("acme-dependency", version);
+        TestArtifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
+        TestArtifact buildPluginTwo = constructArtifact("acme-build-plugin-two", "1.0.1");
+        TestArtifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
+        TestArtifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
         rule.addDependency(extractGaString(dependency));
         rule.addPlugin(extractGaString(buildPluginOne));
         rule.addPlugin(extractGaString(buildPluginTwo));
         rule.addPlugin(extractGaString(reportPluginOne));
         rule.addPlugin(extractGaString(reportPluginTwo));
 
-        HashSet<Artifact> dependencies = new HashSet<>();
+        HashSet<TestArtifact> dependencies = new HashSet<>();
         dependencies.add(dependency);
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
+        HashSet<TestArtifact> pluginArtifacts = new HashSet<>();
         pluginArtifacts.add(buildPluginOne);
         pluginArtifacts.add(buildPluginTwo);
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
+        HashSet<TestArtifact> reportArtifacts = new HashSet<>();
         reportArtifacts.add(reportPluginOne);
         reportArtifacts.add(reportPluginTwo);
-        when(project.getArtifacts()).thenReturn(dependencies);
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        deps = dependencies;
+        plugins = pluginArtifacts;
+        reports = reportArtifacts;
 
-        assertThatCode(rule::execute).isInstanceOf(EnforcerRuleException.class);
+        assertThatCode(this::execute).isInstanceOf(EnforcerRuleException.class);
     }
 
     @Test
-    void testProjectWithDifferentPluginVersionsInBuildAndReportAndPlugins() throws IOException {
+    void testProjectWithDifferentPluginVersionsInBuildAndReportAndPlugins() {
         String version = "1.0.0";
-        Artifact dependency = constructArtifact("acme-dependency", version);
-        Artifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
-        Artifact buildPluginTwo = constructArtifact("acme-build-plugin-two", "1.0.1");
-        Artifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
-        Artifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
+        TestArtifact dependency = constructArtifact("acme-dependency", version);
+        TestArtifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
+        TestArtifact buildPluginTwo = constructArtifact("acme-build-plugin-two", "1.0.1");
+        TestArtifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
+        TestArtifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
         rule.addDependency(extractGaString(dependency));
         rule.addBuildPlugin(extractGaString(buildPluginOne));
         rule.addPlugin(extractGaString(buildPluginTwo));
         rule.addReportPlugin(extractGaString(reportPluginOne));
         rule.addPlugin(extractGaString(reportPluginTwo));
 
-        HashSet<Artifact> dependencies = new HashSet<>();
+        HashSet<TestArtifact> dependencies = new HashSet<>();
         dependencies.add(dependency);
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
+        HashSet<TestArtifact> pluginArtifacts = new HashSet<>();
         pluginArtifacts.add(buildPluginOne);
         pluginArtifacts.add(buildPluginTwo);
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
+        HashSet<TestArtifact> reportArtifacts = new HashSet<>();
         reportArtifacts.add(reportPluginOne);
         reportArtifacts.add(reportPluginTwo);
-        when(project.getArtifacts()).thenReturn(dependencies);
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        deps = dependencies;
+        plugins = pluginArtifacts;
+        reports = reportArtifacts;
 
-        assertThatCode(rule::execute).isInstanceOf(EnforcerRuleException.class);
+        assertThatCode(this::execute).isInstanceOf(EnforcerRuleException.class);
     }
 
     @Test
-    void testProjectWithDifferentDependencyVersionsInBuildAndReportAndPlugins() throws IOException {
+    void testProjectWithDifferentDependencyVersionsInBuildAndReportAndPlugins() {
         String version = "1.0.0";
-        Artifact dependency = constructArtifact("acme-dependency", "1.0.1");
-        Artifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
-        Artifact buildPluginTwo = constructArtifact("acme-build-plugin-two", version);
-        Artifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
-        Artifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
+        TestArtifact dependency = constructArtifact("acme-dependency", "1.0.1");
+        TestArtifact buildPluginOne = constructArtifact("acme-build-plugin-one", version);
+        TestArtifact buildPluginTwo = constructArtifact("acme-build-plugin-two", version);
+        TestArtifact reportPluginOne = constructArtifact("acme-report-plugin-one", version);
+        TestArtifact reportPluginTwo = constructArtifact("acme-report-plugin-two", version);
         rule.addDependency(extractGaString(dependency));
         rule.addBuildPlugin(extractGaString(buildPluginOne));
         rule.addPlugin(extractGaString(buildPluginTwo));
         rule.addReportPlugin(extractGaString(reportPluginOne));
         rule.addPlugin(extractGaString(reportPluginTwo));
 
-        HashSet<Artifact> dependencies = new HashSet<>();
+        HashSet<TestArtifact> dependencies = new HashSet<>();
         dependencies.add(dependency);
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
+        HashSet<TestArtifact> pluginArtifacts = new HashSet<>();
         pluginArtifacts.add(buildPluginOne);
         pluginArtifacts.add(buildPluginTwo);
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
+        HashSet<TestArtifact> reportArtifacts = new HashSet<>();
         reportArtifacts.add(reportPluginOne);
         reportArtifacts.add(reportPluginTwo);
-        when(project.getArtifacts()).thenReturn(dependencies);
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        deps = dependencies;
+        plugins = pluginArtifacts;
+        reports = reportArtifacts;
 
-        assertThatCode(rule::execute).isInstanceOf(EnforcerRuleException.class);
+        assertThatCode(this::execute).isInstanceOf(EnforcerRuleException.class);
     }
 
     @Test
-    void testReportPluginUsesManagedVersionWhenArtifactVersionIsRelease() throws IOException {
+    void testReportPluginUsesManagedVersionWhenArtifactVersionIsRelease() {
         String version = "3.5.3";
 
-        Artifact buildPlugin =
-                ARTIFACT_FACTORY.createArtifact("org.apache.maven.plugins", "maven-surefire-plugin", version);
-        Artifact reportPlugin =
-                ARTIFACT_FACTORY.createArtifact("org.apache.maven.plugins", "maven-surefire-report-plugin", "RELEASE");
+        TestArtifact buildPlugin = createArtifact("org.apache.maven.plugins", "maven-surefire-plugin", version);
+        TestArtifact reportPlugin =
+                createArtifact("org.apache.maven.plugins", "maven-surefire-report-plugin", "RELEASE");
 
         rule.addBuildPlugin(extractGaString(buildPlugin));
         rule.addReportPlugin(extractGaString(reportPlugin));
 
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
-        pluginArtifacts.add(buildPlugin);
+        plugins = Collections.singleton(buildPlugin);
+        reports = Collections.singleton(reportPlugin);
 
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
-        reportArtifacts.add(reportPlugin);
+        Plugin managedReportPlugin = Plugin.newBuilder()
+                .groupId("org.apache.maven.plugins")
+                .artifactId("maven-surefire-report-plugin")
+                .version(version)
+                .build();
 
-        when(project.getArtifacts()).thenReturn(new HashSet<>());
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        build = Build.newBuilder()
+                .pluginManagement(PluginManagement.newBuilder()
+                        .plugins(Collections.singletonList(managedReportPlugin))
+                        .build())
+                .build();
 
-        Plugin managedReportPlugin = new Plugin();
-        managedReportPlugin.setGroupId("org.apache.maven.plugins");
-        managedReportPlugin.setArtifactId("maven-surefire-report-plugin");
-        managedReportPlugin.setVersion(version);
-
-        Build build = new Build();
-        PluginManagement pluginManagement = new PluginManagement();
-        pluginManagement.setPlugins(Collections.singletonList(managedReportPlugin));
-        build.setPluginManagement(pluginManagement);
-
-        when(project.getBuild()).thenReturn(build);
-
-        assertThatCode(rule::execute).doesNotThrowAnyException();
+        assertThatCode(this::execute).doesNotThrowAnyException();
     }
 
     @Test
-    void testReportPluginUsesBuildPluginVersionBeforeManagedVersion() throws IOException {
+    void testReportPluginUsesBuildPluginVersionBeforeManagedVersion() {
         String buildPluginVersion = "3.5.3";
         String managedVersion = "3.6.0";
 
-        Artifact buildPlugin = ARTIFACT_FACTORY.createArtifact(
-                "org.apache.maven.plugins", "maven-surefire-plugin", buildPluginVersion);
-        Artifact reportPlugin =
-                ARTIFACT_FACTORY.createArtifact("org.apache.maven.plugins", "maven-surefire-report-plugin", "RELEASE");
+        TestArtifact buildPlugin =
+                createArtifact("org.apache.maven.plugins", "maven-surefire-plugin", buildPluginVersion);
+        TestArtifact reportPlugin =
+                createArtifact("org.apache.maven.plugins", "maven-surefire-report-plugin", "RELEASE");
 
         rule.addBuildPlugin(extractGaString(buildPlugin));
         rule.addReportPlugin(extractGaString(reportPlugin));
 
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
-        pluginArtifacts.add(buildPlugin);
+        plugins = Collections.singleton(buildPlugin);
+        reports = Collections.singleton(reportPlugin);
 
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
-        reportArtifacts.add(reportPlugin);
+        Plugin buildReportPlugin = Plugin.newBuilder()
+                .groupId("org.apache.maven.plugins")
+                .artifactId("maven-surefire-report-plugin")
+                .version(buildPluginVersion)
+                .build();
 
-        when(project.getArtifacts()).thenReturn(new HashSet<>());
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        Plugin managedReportPlugin = Plugin.newBuilder()
+                .groupId("org.apache.maven.plugins")
+                .artifactId("maven-surefire-report-plugin")
+                .version(managedVersion)
+                .build();
 
-        Plugin buildReportPlugin = new Plugin();
-        buildReportPlugin.setGroupId("org.apache.maven.plugins");
-        buildReportPlugin.setArtifactId("maven-surefire-report-plugin");
-        buildReportPlugin.setVersion(buildPluginVersion);
+        build = Build.newBuilder()
+                .plugins(Collections.singletonList(buildReportPlugin))
+                .pluginManagement(PluginManagement.newBuilder()
+                        .plugins(Collections.singletonList(managedReportPlugin))
+                        .build())
+                .build();
 
-        Plugin managedReportPlugin = new Plugin();
-        managedReportPlugin.setGroupId("org.apache.maven.plugins");
-        managedReportPlugin.setArtifactId("maven-surefire-report-plugin");
-        managedReportPlugin.setVersion(managedVersion);
-
-        Build build = new Build();
-        build.setPlugins(Collections.singletonList(buildReportPlugin));
-
-        PluginManagement pluginManagement = new PluginManagement();
-        pluginManagement.setPlugins(Collections.singletonList(managedReportPlugin));
-        build.setPluginManagement(pluginManagement);
-
-        when(project.getBuild()).thenReturn(build);
-
-        assertThatCode(rule::execute).doesNotThrowAnyException();
+        assertThatCode(this::execute).doesNotThrowAnyException();
     }
 
     @Test
-    void testReportPluginFailsWhenManagedVersionDiffersFromBuildPlugin() throws IOException {
+    void testReportPluginFailsWhenManagedVersionDiffersFromBuildPlugin() {
         String buildPluginVersion = "3.5.3";
         String managedVersion = "3.6.0";
 
-        Artifact buildPlugin = ARTIFACT_FACTORY.createArtifact(
-                "org.apache.maven.plugins", "maven-surefire-plugin", buildPluginVersion);
-        Artifact reportPlugin =
-                ARTIFACT_FACTORY.createArtifact("org.apache.maven.plugins", "maven-surefire-report-plugin", "RELEASE");
+        TestArtifact buildPlugin =
+                createArtifact("org.apache.maven.plugins", "maven-surefire-plugin", buildPluginVersion);
+        TestArtifact reportPlugin =
+                createArtifact("org.apache.maven.plugins", "maven-surefire-report-plugin", "RELEASE");
 
         rule.addBuildPlugin(extractGaString(buildPlugin));
         rule.addReportPlugin(extractGaString(reportPlugin));
 
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
-        pluginArtifacts.add(buildPlugin);
+        plugins = Collections.singleton(buildPlugin);
+        reports = Collections.singleton(reportPlugin);
 
-        HashSet<Artifact> reportArtifacts = new HashSet<>();
-        reportArtifacts.add(reportPlugin);
+        Plugin managedReportPlugin = Plugin.newBuilder()
+                .groupId("org.apache.maven.plugins")
+                .artifactId("maven-surefire-report-plugin")
+                .version(managedVersion)
+                .build();
 
-        when(project.getArtifacts()).thenReturn(new HashSet<>());
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(reportArtifacts);
+        build = Build.newBuilder()
+                .pluginManagement(PluginManagement.newBuilder()
+                        .plugins(Collections.singletonList(managedReportPlugin))
+                        .build())
+                .build();
 
-        Plugin managedReportPlugin = new Plugin();
-        managedReportPlugin.setGroupId("org.apache.maven.plugins");
-        managedReportPlugin.setArtifactId("maven-surefire-report-plugin");
-        managedReportPlugin.setVersion(managedVersion);
-
-        Build build = new Build();
-        PluginManagement pluginManagement = new PluginManagement();
-        pluginManagement.setPlugins(Collections.singletonList(managedReportPlugin));
-        build.setPluginManagement(pluginManagement);
-
-        when(project.getBuild()).thenReturn(build);
-
-        assertThatThrownBy(rule::execute).isInstanceOf(EnforcerRuleException.class);
+        assertThatThrownBy(this::execute).isInstanceOf(EnforcerRuleException.class);
     }
 
     @Test
-    void shouldOutputCustomMessageWhenVersionsDiffer() throws IOException {
+    void shouldOutputCustomMessageWhenVersionsDiffer() {
         String customMessage = "Custom same versions message";
         rule.setMessage(customMessage);
 
-        Artifact dep1 = constructArtifact("acme-dep", "1.0");
-        Artifact dep2 = constructArtifact("acme-dep2", "2.0");
+        TestArtifact dep1 = constructArtifact("acme-dep", "1.0");
+        TestArtifact dep2 = constructArtifact("acme-dep2", "2.0");
 
-        HashSet<Artifact> dependencies = new HashSet<>();
+        HashSet<TestArtifact> dependencies = new HashSet<>();
         dependencies.add(dep1);
         dependencies.add(dep2);
 
-        when(project.getArtifacts()).thenReturn(dependencies);
-        when(project.getPluginArtifacts()).thenReturn(new HashSet<>());
-        when(project.getReportArtifacts()).thenReturn(new HashSet<>());
+        deps = dependencies;
 
         rule.addDependency("org.acme:acme-dep");
         rule.addDependency("org.acme:acme-dep2");
 
-        assertThatThrownBy(() -> rule.execute())
+        assertThatThrownBy(this::execute)
                 .isInstanceOf(EnforcerRuleException.class)
                 .hasMessageStartingWith(customMessage);
     }
 
     @Test
-    void failureMessageListsEachPluginUnderItsVersion() throws IOException {
-        Artifact surefire = constructArtifact("acme-surefire", "2.14");
-        Artifact failsafe = constructArtifact("acme-failsafe", "2.15");
-        Artifact surefireReport = constructArtifact("acme-surefire-report", "2.13");
+    void failureMessageListsEachPluginUnderItsVersion() {
+        TestArtifact surefire = constructArtifact("acme-surefire", "2.14");
+        TestArtifact failsafe = constructArtifact("acme-failsafe", "2.15");
+        TestArtifact surefireReport = constructArtifact("acme-surefire-report", "2.13");
 
         rule.addBuildPlugin(extractGaString(surefire));
         rule.addBuildPlugin(extractGaString(failsafe));
         rule.addReportPlugin(extractGaString(surefireReport));
 
-        when(project.getArtifacts()).thenReturn(new HashSet<>());
-        when(project.getPluginArtifacts()).thenReturn(new HashSet<>(Arrays.asList(surefire, failsafe)));
-        when(project.getReportArtifacts()).thenReturn(Collections.singleton(surefireReport));
+        plugins = new HashSet<>(Arrays.asList(surefire, failsafe));
+        reports = Collections.singleton(surefireReport);
 
-        when(project.getReportPlugins()).thenReturn(Collections.emptyList());
-        when(project.getBuild()).thenReturn(new Build());
-
-        assertThatThrownBy(rule::execute)
+        assertThatThrownBy(this::execute)
                 .isInstanceOf(EnforcerRuleException.class)
                 .hasMessageContaining("Found entries with different versions")
-                .hasMessageContaining("- org.acme:acme-surefire:jar (buildPlugin)")
-                .hasMessageContaining("- org.acme:acme-failsafe:jar (buildPlugin)")
-                .hasMessageContaining("- org.acme:acme-surefire-report:jar (reportPlugin)");
+                .hasMessageContaining("- org.acme:acme-surefire:maven-plugin (buildPlugin)")
+                .hasMessageContaining("- org.acme:acme-failsafe:maven-plugin (buildPlugin)")
+                .hasMessageContaining("- org.acme:acme-surefire-report:maven-plugin (reportPlugin)");
     }
 
     @Test
-    void shouldListMembersFromAllSourcesSharingAConflictingVersion() throws IOException {
+    void shouldListMembersFromAllSourcesSharingAConflictingVersion() {
         String conflictVersion = "1.0";
-        Artifact dependencyAtConflictVersion = constructArtifact("acme-dependency", conflictVersion);
-        Artifact buildPluginAtConflictVersion = constructArtifact("acme-build-plugin", conflictVersion);
-        Artifact dependencyAtOtherVersion = constructArtifact("acme-other-dependency", "2.0");
+        TestArtifact dependencyAtConflictVersion = constructArtifact("acme-dependency", conflictVersion);
+        TestArtifact buildPluginAtConflictVersion = constructArtifact("acme-build-plugin", conflictVersion);
+        TestArtifact dependencyAtOtherVersion = constructArtifact("acme-other-dependency", "2.0");
 
         rule.addDependency(extractGaString(dependencyAtConflictVersion));
         rule.addDependency(extractGaString(dependencyAtOtherVersion));
         rule.addBuildPlugin(extractGaString(buildPluginAtConflictVersion));
 
-        HashSet<Artifact> dependencies = new HashSet<>();
-        dependencies.add(dependencyAtConflictVersion);
-        dependencies.add(dependencyAtOtherVersion);
-        HashSet<Artifact> pluginArtifacts = new HashSet<>();
-        pluginArtifacts.add(buildPluginAtConflictVersion);
-
-        when(project.getArtifacts()).thenReturn(dependencies);
-        when(project.getPluginArtifacts()).thenReturn(pluginArtifacts);
-        when(project.getReportArtifacts()).thenReturn(new HashSet<>());
+        deps = new HashSet<>(Arrays.asList(dependencyAtConflictVersion, dependencyAtOtherVersion));
+        plugins = Collections.singleton(buildPluginAtConflictVersion);
 
         // Both members at the shared version must be named, not just the one from
-        // whichever source (dependency, build plugin, report plugin) was merged last.
-        assertThatThrownBy(rule::execute)
+        // whichever source (dependency, build plugin, report plugin) was collected last.
+        assertThatThrownBy(this::execute)
                 .isInstanceOf(EnforcerRuleException.class)
                 .hasMessageContaining("org.acme:acme-dependency")
                 .hasMessageContaining("org.acme:acme-build-plugin");
     }
 
-    private static Artifact constructArtifact(String artifactId, String version) throws IOException {
-        return ARTIFACT_FACTORY.createArtifact("org.acme", artifactId, version);
+    private static TestArtifact constructArtifact(String artifactId, String version) {
+        return createArtifact("org.acme", artifactId, version);
     }
 
-    private static String extractGaString(Artifact dependency) {
-        return String.format("%s:%s", dependency.getGroupId(), dependency.getArtifactId());
+    private static TestArtifact createArtifact(String groupId, String artifactId, String version) {
+        return new TestArtifact(groupId, artifactId, version);
+    }
+
+    private static String extractGaString(TestArtifact dependency) {
+        return String.format("%s:%s", dependency.groupId, dependency.artifactId);
+    }
+
+    private static final class TestArtifact {
+        private final String groupId;
+        private final String artifactId;
+        private final String version;
+
+        TestArtifact(String groupId, String artifactId, String version) {
+            this.groupId = groupId;
+            this.artifactId = artifactId;
+            this.version = version;
+        }
     }
 }

@@ -18,63 +18,44 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.maven.BuildFailureException;
-import org.apache.maven.RepositoryUtils;
-import org.apache.maven.artifact.Artifact;
-import org.apache.maven.artifact.factory.ArtifactFactory;
-import org.apache.maven.artifact.repository.ArtifactRepository;
-import org.apache.maven.artifact.resolver.ArtifactNotFoundException;
-import org.apache.maven.artifact.versioning.InvalidVersionSpecificationException;
-import org.apache.maven.artifact.versioning.VersionRange;
+import org.apache.maven.api.Lifecycle;
+import org.apache.maven.api.Packaging;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Build;
+import org.apache.maven.api.model.BuildBase;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.ModelBase;
+import org.apache.maven.api.model.Plugin;
+import org.apache.maven.api.model.PluginConfiguration;
+import org.apache.maven.api.model.PluginContainer;
+import org.apache.maven.api.model.Profile;
+import org.apache.maven.api.model.ReportPlugin;
+import org.apache.maven.api.model.Reporting;
+import org.apache.maven.api.services.ArtifactResolverException;
+import org.apache.maven.api.services.LifecycleRegistry;
+import org.apache.maven.api.services.ProjectManager;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleError;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.EnforcerRuleUtils;
 import org.apache.maven.enforcer.rules.utils.ExpressionEvaluator;
 import org.apache.maven.enforcer.rules.utils.PluginWrapper;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.lifecycle.DefaultLifecycles;
-import org.apache.maven.lifecycle.Lifecycle;
-import org.apache.maven.lifecycle.LifecycleExecutionException;
-import org.apache.maven.lifecycle.mapping.LifecycleMapping;
-import org.apache.maven.model.BuildBase;
-import org.apache.maven.model.Model;
-import org.apache.maven.model.ModelBase;
-import org.apache.maven.model.Plugin;
-import org.apache.maven.model.PluginConfiguration;
-import org.apache.maven.model.PluginContainer;
-import org.apache.maven.model.Profile;
-import org.apache.maven.model.ReportPlugin;
-import org.apache.maven.model.Reporting;
-import org.apache.maven.plugin.InvalidPluginException;
-import org.apache.maven.plugin.PluginManager;
-import org.apache.maven.plugin.PluginManagerException;
-import org.apache.maven.plugin.PluginNotFoundException;
-import org.apache.maven.plugin.version.PluginVersionNotFoundException;
-import org.apache.maven.plugin.version.PluginVersionResolutionException;
-import org.apache.maven.project.MavenProject;
-import org.apache.maven.rtinfo.RuntimeInformation;
-import org.apache.maven.settings.Settings;
-import org.codehaus.plexus.PlexusContainer;
-import org.codehaus.plexus.component.configurator.expression.ExpressionEvaluationException;
-import org.codehaus.plexus.component.repository.exception.ComponentLookupException;
-import org.eclipse.aether.RepositorySystem;
-import org.eclipse.aether.resolution.ArtifactRequest;
-import org.eclipse.aether.resolution.ArtifactResolutionException;
 
 import static java.util.Optional.ofNullable;
 
@@ -85,6 +66,10 @@ import static java.util.Optional.ofNullable;
  */
 @Named("requirePluginVersions")
 public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
+
+    private static final String SNAPSHOT_VERSION = "SNAPSHOT";
+
+    private static final Pattern VERSION_FILE_PATTERN = Pattern.compile("^(.*)-([0-9]{8}\\.[0-9]{6})-([0-9]+)$");
 
     /**
      * Don't allow the LATEST identifier.
@@ -141,114 +126,81 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
     /** The phase to lifecycle map. */
     private Map<String, Lifecycle> phaseToLifecycleMap;
 
-    /** The lifecycles. */
-    private Collection<Lifecycle> lifecycles;
+    private final Session session;
 
-    /** The plugin manager. */
-    private final PluginManager pluginManager;
+    private final ProjectManager projectManager;
 
-    /** The factory. */
-    private final ArtifactFactory factory;
+    private final LifecycleRegistry lifecycleRegistry;
 
-    private final RepositorySystem repositorySystem;
-
-    /** The session. */
-    private final MavenSession session;
-
-    /** The utils. */
     private final EnforcerRuleUtils utils;
 
-    private final RuntimeInformation runtimeInformation;
-
-    private final DefaultLifecycles defaultLifeCycles;
-
-    private final MavenProject project;
+    private final Project project;
 
     private final ExpressionEvaluator evaluator;
 
-    private final PlexusContainer container;
-
-    @SuppressWarnings("checkstyle:ParameterNumber")
     @Inject
     public RequirePluginVersions(
-            PluginManager pluginManager,
-            ArtifactFactory factory,
-            RepositorySystem repositorySystem,
-            MavenSession session,
+            Session session,
+            ProjectManager projectManager,
+            LifecycleRegistry lifecycleRegistry,
             EnforcerRuleUtils utils,
-            RuntimeInformation runtimeInformation,
-            DefaultLifecycles defaultLifeCycles,
-            MavenProject project,
-            ExpressionEvaluator evaluator,
-            PlexusContainer container) {
-        this.pluginManager = Objects.requireNonNull(pluginManager);
-        this.factory = Objects.requireNonNull(factory);
-        this.repositorySystem = Objects.requireNonNull(repositorySystem);
+            Project project,
+            ExpressionEvaluator evaluator) {
         this.session = Objects.requireNonNull(session);
+        this.projectManager = Objects.requireNonNull(projectManager);
+        this.lifecycleRegistry = Objects.requireNonNull(lifecycleRegistry);
         this.utils = Objects.requireNonNull(utils);
-        this.runtimeInformation = Objects.requireNonNull(runtimeInformation);
-        this.defaultLifeCycles = Objects.requireNonNull(defaultLifeCycles);
         this.project = Objects.requireNonNull(project);
         this.evaluator = Objects.requireNonNull(evaluator);
-        this.container = Objects.requireNonNull(container);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
 
-        try {
-            // get the various expressions out of the helper.
+        // get all the plugins that are bound to the specified lifecycles
+        Map<String, Plugin> allPlugins = getBoundPlugins(project, phases);
 
-            lifecycles = defaultLifeCycles.getLifeCycles();
+        // insert any additional plugins specified by the user.
+        allPlugins = addAdditionalPlugins(allPlugins, additionalPlugins);
+        allPlugins.putAll(getProfilePlugins(project));
 
-            // get all the plugins that are bound to the specified lifecycles
-            Set<Plugin> allPlugins = getBoundPlugins(project, phases);
+        // pull out any we should skip
+        allPlugins = removeUncheckedPlugins(combineUncheckedPlugins(unCheckedPlugins, unCheckedPluginList), allPlugins);
 
-            // insert any additional plugins specified by the user.
-            allPlugins = addAdditionalPlugins(allPlugins, additionalPlugins);
-            allPlugins.addAll(getProfilePlugins(project));
+        // there's nothing to do here
+        if (allPlugins.isEmpty()) {
+            getLog().info("No plugin bindings found.");
+            return;
+        } else {
+            getLog().debug("All Plugins in use: " + allPlugins.keySet());
+        }
 
-            // pull out any we should skip
-            allPlugins =
-                    removeUncheckedPlugins(combineUncheckedPlugins(unCheckedPlugins, unCheckedPluginList), allPlugins);
+        // get all the plugins that are mentioned in the pom (and parents)
+        List<PluginWrapper> pluginWrappers = getAllPluginEntries(project);
 
-            // there's nothing to do here
-            if (allPlugins.isEmpty()) {
-                getLog().info("No plugin bindings found.");
-                return;
-            } else {
-                getLog().debug("All Plugins in use: " + allPlugins);
+        for (PluginWrapper pluginWrapper : pluginWrappers) {
+            getLog().debug("pluginWrappers: " + pluginWrapper.getGroupId() + ":" + pluginWrapper.getArtifactId() + ":"
+                    + pluginWrapper.getVersion() + " source: " + pluginWrapper.getSource());
+        }
+        // now look for the versions that aren't valid and add to a list.
+        List<Plugin> failures = new ArrayList<>();
+
+        for (Plugin plugin : allPlugins.values()) {
+            if (!hasValidVersionSpecified(plugin, pluginWrappers)) {
+                failures.add(plugin);
             }
+        }
 
-            // get all the plugins that are mentioned in the pom (and parents)
-            List<PluginWrapper> pluginWrappers = getAllPluginEntries(project);
-
-            for (PluginWrapper pluginWrapper : pluginWrappers) {
-                getLog().debug("pluginWrappers: " + pluginWrapper.getGroupId() + ":" + pluginWrapper.getArtifactId()
-                        + ":" + pluginWrapper.getVersion() + " source: " + pluginWrapper.getSource());
-            }
-            // now look for the versions that aren't valid and add to a list.
-            List<Plugin> failures = new ArrayList<>();
-
-            for (Plugin plugin : allPlugins) {
-                if (!hasValidVersionSpecified(plugin, pluginWrappers)) {
-                    failures.add(plugin);
-                }
-            }
-
-            // if anything was found, log it then append the optional message.
-            if (!failures.isEmpty()) {
-                handleMessagesToTheUser(project, failures);
-            }
-        } catch (PluginNotFoundException | LifecycleExecutionException e) {
-            throw new EnforcerRuleException(e.getLocalizedMessage(), e);
+        // if anything was found, log it then append the optional message.
+        if (!failures.isEmpty()) {
+            handleMessagesToTheUser(project, failures);
         }
     }
 
-    private void handleMessagesToTheUser(MavenProject project, List<Plugin> failures) throws EnforcerRuleException {
+    private void handleMessagesToTheUser(Project project, List<Plugin> failures) throws EnforcerRuleException {
         StringBuilder newMsg = new StringBuilder();
         newMsg.append("Some plugins are missing valid versions or depend on Maven ");
-        newMsg.append(runtimeInformation.getMavenVersion());
+        newMsg.append(session.getMavenVersion());
         newMsg.append(" defaults");
         handleBanMessages(newMsg);
         newMsg.append(System.lineSeparator());
@@ -326,12 +278,12 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
      * @param plugins
      * @return The plugins which have been removed.
      */
-    Set<Plugin> removeUncheckedPlugins(Collection<String> uncheckedPlugins, Set<Plugin> plugins)
+    Map<String, Plugin> removeUncheckedPlugins(Collection<String> uncheckedPlugins, Map<String, Plugin> plugins)
             throws EnforcerRuleError {
         if (uncheckedPlugins != null && !uncheckedPlugins.isEmpty()) {
             for (String pluginKey : uncheckedPlugins) {
                 Plugin plugin = parsePluginString(pluginKey, "UncheckedPlugins");
-                plugins.remove(plugin);
+                plugins.remove(plugin.getKey());
             }
         }
         return plugins;
@@ -368,14 +320,15 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
      * @return the additional and existing plugins
      * @throws EnforcerRuleError the enforcer error
      */
-    public Set<Plugin> addAdditionalPlugins(Set<Plugin> existing, List<String> additional) throws EnforcerRuleError {
+    public Map<String, Plugin> addAdditionalPlugins(Map<String, Plugin> existing, List<String> additional)
+            throws EnforcerRuleError {
         if (additional != null) {
             if (existing == null) {
-                existing = new HashSet<>();
+                existing = new LinkedHashMap<>();
             }
             for (String pluginString : additional) {
                 Plugin plugin = parsePluginString(pluginString, "AdditionalPlugins");
-                existing.add(plugin);
+                existing.putIfAbsent(plugin.getKey(), plugin);
             }
         }
         return existing;
@@ -392,11 +345,10 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
         if (pluginString != null) {
             String[] pluginStrings = pluginString.split(":");
             if (pluginStrings.length == 2) {
-                Plugin plugin = new Plugin();
-                plugin.setGroupId(StringUtils.strip(pluginStrings[0]));
-                plugin.setArtifactId(StringUtils.strip(pluginStrings[1]));
-
-                return plugin;
+                return Plugin.newBuilder()
+                        .groupId(StringUtils.strip(pluginStrings[0]))
+                        .artifactId(StringUtils.strip(pluginStrings[1]))
+                        .build();
             } else {
                 throw new EnforcerRuleError("Invalid " + field + " string: " + pluginString);
             }
@@ -411,16 +363,16 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
      * @param project the project
      * @return the profile plugins
      */
-    public Set<Plugin> getProfilePlugins(MavenProject project) {
-        Set<Plugin> result = new HashSet<>();
-        List<Profile> profiles = project.getActiveProfiles();
+    public Map<String, Plugin> getProfilePlugins(Project project) {
+        Map<String, Plugin> result = new LinkedHashMap<>();
+        List<Profile> profiles = project.getEffectiveActiveProfiles();
         if (profiles != null && !profiles.isEmpty()) {
             for (Profile p : profiles) {
                 BuildBase b = p.getBuild();
                 if (b != null) {
                     List<Plugin> plugins = b.getPlugins();
                     if (plugins != null) {
-                        result.addAll(plugins);
+                        plugins.forEach(plugin -> result.putIfAbsent(plugin.getKey(), plugin));
                     }
                 }
             }
@@ -435,33 +387,19 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
      * @param project project to search
      * @return matching plugin, <code>null</code> if not found.
      */
-    private Plugin findCurrentPlugin(Plugin plugin, MavenProject project) throws EnforcerRuleException {
-        Plugin found = null;
-        try {
-            Model model = project.getModel();
-            Map<String, Plugin> plugins = model.getBuild().getPluginsAsMap();
-            found = plugins.get(plugin.getKey());
-        } catch (NullPointerException e) {
-            // nothing to do here
-        }
+    private Plugin findCurrentPlugin(Plugin plugin, Project project) throws EnforcerRuleException {
+        Build build = project.getModel().getBuild();
+        Plugin found = build != null ? build.getPluginsAsMap().get(plugin.getKey()) : null;
 
         if (found == null) {
-            Artifact artifact = factory.createPluginArtifact(
-                    plugin.getGroupId(), plugin.getArtifactId(), VersionRange.createFromVersion("LATEST"));
-
             try {
-                repositorySystem.resolveArtifact(
-                        session.getRepositorySession(),
-                        new ArtifactRequest(
-                                RepositoryUtils.toArtifact(artifact),
-                                session.getCurrentProject().getRemotePluginRepositories(),
-                                "resolvePlugin"));
-            } catch (ArtifactResolutionException e) {
-                throw new EnforcerRuleException("Unable to resolve the plugin " + artifact.getArtifactId(), e);
+                session.resolveArtifact(
+                        session.createArtifactCoordinates(plugin.getGroupId(), plugin.getArtifactId(), "LATEST", "jar"),
+                        projectManager.getRemotePluginRepositories(project));
+            } catch (ArtifactResolverException e) {
+                throw new EnforcerRuleException("Unable to resolve the plugin " + plugin.getArtifactId(), e);
             }
-            plugin.setVersion(artifact.getVersion());
-
-            found = plugin;
+            found = plugin.withVersion("LATEST");
         }
 
         return found;
@@ -477,26 +415,22 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
      * @throws PluginNotFoundException     the plugin not found exception
      * @throws LifecycleExecutionException the lifecycle execution exception
      */
-    private Set<Plugin> getBoundPlugins(MavenProject project, String phases)
-            throws PluginNotFoundException, LifecycleExecutionException {
+    private Map<String, Plugin> getBoundPlugins(Project project, String phases) throws EnforcerRuleException {
 
-        Set<Plugin> allPlugins = new HashSet<>();
+        Map<String, Plugin> allPlugins = new LinkedHashMap<>();
 
         // lookup the bindings for all the passed in phases
         String[] lifecyclePhases = phases.split(",");
         for (int i = 0; i < lifecyclePhases.length; i++) {
             String lifecyclePhase = lifecyclePhases[i];
             if (lifecyclePhase != null && !lifecyclePhase.isEmpty()) {
-                try {
-                    Lifecycle lifecycle = getLifecycleForPhase(lifecyclePhase);
-                    getLog().debug("getBoundPlugins(): " + project.getId() + " " + lifecyclePhase + " "
-                            + lifecycle.getId());
-                    allPlugins.addAll(getAllPlugins(project, lifecycle));
-                } catch (BuildFailureException e) {
-                    // swallow this because the
-                    // user may have declared a phase that
-                    // doesn't exist for every module.
+                Lifecycle lifecycle = getLifecycleForPhase(lifecyclePhase);
+                if (lifecycle == null) {
+                    // swallow this because the user may have declared a phase that doesn't exist for every module.
+                    continue;
                 }
+                getLog().debug("getBoundPlugins(): " + project.getId() + " " + lifecyclePhase + " " + lifecycle.id());
+                getAllPlugins(project, lifecycle).forEach(allPlugins::putIfAbsent);
             }
         }
         return allPlugins;
@@ -521,7 +455,7 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
                 String version = plugin.getVersion();
                 try {
                     version = (String) evaluator.evaluate(version);
-                } catch (ExpressionEvaluationException e) {
+                } catch (IllegalStateException e) {
                     return false;
                 }
 
@@ -574,10 +508,9 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
      */
     private boolean isSnapshot(String baseVersion) {
         if (banTimestamps) {
-            return Artifact.VERSION_FILE_PATTERN.matcher(baseVersion).matches()
-                    || baseVersion.endsWith(Artifact.SNAPSHOT_VERSION);
+            return VERSION_FILE_PATTERN.matcher(baseVersion).matches() || baseVersion.endsWith(SNAPSHOT_VERSION);
         } else {
-            return baseVersion.endsWith(Artifact.SNAPSHOT_VERSION);
+            return baseVersion.endsWith(SNAPSHOT_VERSION);
         }
     }
 
@@ -594,64 +527,79 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
      * @throws PluginNotFoundException     the plugin not found exception
      * @throws LifecycleExecutionException the lifecycle execution exception
      */
-    private Set<Plugin> getAllPlugins(MavenProject project, Lifecycle lifecycle)
-            throws PluginNotFoundException, LifecycleExecutionException {
+    private Map<String, Plugin> getAllPlugins(Project project, Lifecycle lifecycle) throws EnforcerRuleException {
 
         getLog().debug("RequirePluginVersions.getAllPlugins:");
 
-        Set<Plugin> plugins = new HashSet<>();
-        // first, bind those associated with the packaging
-        Map<String, String> mappings = findMappingsForLifecycle(project, lifecycle);
+        Map<String, Plugin> plugins = new LinkedHashMap<>();
 
-        for (Map.Entry<String, String> entry : mappings.entrySet()) {
-            getLog().debug("  lifecycleMapping = " + entry.getKey());
-            String pluginsForLifecycle = entry.getValue();
-            getLog().debug("  plugins = " + pluginsForLifecycle);
-            if (pluginsForLifecycle != null && !pluginsForLifecycle.isEmpty()) {
-                String pluginList[] = pluginsForLifecycle.split(",");
-                for (String plugin : pluginList) {
-                    plugin = plugin == null ? null : plugin.trim();
-                    getLog().debug("    plugin = " + plugin);
-                    String tokens[] = plugin.split(":");
-                    getLog().debug("    GAV = " + Arrays.asList(tokens));
+        // first, the bindings defined by the lifecycle itself, for example clean and site
+        lifecycle.allPhases().forEach(phase -> {
+            getLog().debug("  lifecycle phase = " + phase.name());
+            for (Plugin plugin : phase.plugins()) {
+                addBinding(plugins, plugin);
+            }
+        });
 
-                    Plugin p = new Plugin();
-                    p.setGroupId(tokens[0]);
-                    p.setArtifactId(tokens[1]);
-                    plugins.add(p);
+        // then, bind those associated with the packaging
+        Packaging packaging;
+        try {
+            packaging = session.requirePackaging(project.getModel().getPackaging());
+        } catch (IllegalArgumentException e) {
+            throw new EnforcerRuleException(
+                    "Cannot find lifecycle mapping for packaging: '"
+                            + project.getModel().getPackaging() + "'.",
+                    e);
+        }
+        Set<String> lifecyclePhases = new HashSet<>(lifecycleRegistry.computePhases(lifecycle));
+        for (Map.Entry<String, PluginContainer> entry : packaging.plugins().entrySet()) {
+            // the phases of the packaging are the phases of the default lifecycle
+            if (Lifecycle.DEFAULT.equals(lifecycle.id()) || lifecyclePhases.contains(entry.getKey())) {
+                getLog().debug("  lifecycleMapping = " + entry.getKey());
+                for (Plugin plugin : entry.getValue().getPlugins()) {
+                    getLog().debug("    plugin = " + plugin.getKey());
+                    addBinding(plugins, plugin);
                 }
             }
         }
 
-        plugins.addAll(project.getBuildPlugins());
+        Build build = project.getModel().getBuild();
+        if (build != null) {
+            build.getPlugins().forEach(plugin -> plugins.putIfAbsent(plugin.getKey(), plugin));
+        }
 
         return plugins;
     }
 
-    /*
-     * NOTE: All the code following this point was scooped from the DefaultLifecycleExecutor. There must be a better way
-     * but for now it should work.
-     */
+    private static void addBinding(Map<String, Plugin> plugins, Plugin plugin) {
+        // only coordinates without version are known for the bindings
+        Plugin binding = Plugin.newBuilder()
+                .groupId(plugin.getGroupId())
+                .artifactId(plugin.getArtifactId())
+                .build();
+        plugins.putIfAbsent(binding.getKey(), binding);
+    }
 
     /**
      * Gets the phase to lifecycle map.
      *
      * @return the phase to lifecycle map
-     * @throws LifecycleExecutionException the lifecycle execution exception
+     * @throws EnforcerRuleException if a phase is defined in more than one lifecycle
      */
-    public Map<String, Lifecycle> getPhaseToLifecycleMap() throws LifecycleExecutionException {
+    public Map<String, Lifecycle> getPhaseToLifecycleMap() throws EnforcerRuleException {
         if (phaseToLifecycleMap == null) {
             phaseToLifecycleMap = new HashMap<>();
 
-            for (Lifecycle lifecycle : lifecycles) {
-                List<String> phases = lifecycle.getPhases();
-                for (String phase : phases) {
+            for (Lifecycle lifecycle : lifecycleRegistry) {
+                List<String> lifecyclePhases = new ArrayList<>(lifecycleRegistry.computePhases(lifecycle));
+                lifecycle.aliases().forEach(alias -> lifecyclePhases.add(alias.v3Phase()));
+                for (String phase : lifecyclePhases) {
                     getLog().debug("getPhaseToLifecycleMap(): phase: " + phase);
-                    if (phaseToLifecycleMap.containsKey(phase)) {
-                        Lifecycle prevLifecycle = phaseToLifecycleMap.get(phase);
-                        throw new LifecycleExecutionException("Phase '" + phase
-                                + "' is defined in more than one lifecycle: '" + lifecycle.getId() + "' and '"
-                                + prevLifecycle.getId() + "'");
+                    Lifecycle prevLifecycle = phaseToLifecycleMap.get(phase);
+                    if (prevLifecycle != null && prevLifecycle != lifecycle) {
+                        throw new EnforcerRuleException("Phase '" + phase
+                                + "' is defined in more than one lifecycle: '" + lifecycle.id() + "' and '"
+                                + prevLifecycle.id() + "'");
                     } else {
                         phaseToLifecycleMap.put(phase, lifecycle);
                     }
@@ -661,150 +609,11 @@ public final class RequirePluginVersions extends AbstractStandardEnforcerRule {
         return phaseToLifecycleMap;
     }
 
-    /**
-     * Gets the lifecycle for phase.
-     *
-     * @param phase the phase
-     * @return the lifecycle for phase
-     * @throws BuildFailureException       the build failure exception
-     * @throws LifecycleExecutionException the lifecycle execution exception
-     */
-    private Lifecycle getLifecycleForPhase(String phase) throws BuildFailureException, LifecycleExecutionException {
-        Lifecycle lifecycle = getPhaseToLifecycleMap().get(phase);
-
-        if (lifecycle == null) {
-            throw new BuildFailureException("Unable to find lifecycle for phase '" + phase + "'");
-        }
-        return lifecycle;
+    private Lifecycle getLifecycleForPhase(String phase) throws EnforcerRuleException {
+        return getPhaseToLifecycleMap().get(phase);
     }
 
-    /**
-     * Find mappings for lifecycle.
-     *
-     * @param project   the project
-     * @param lifecycle the lifecycle
-     * @return the map
-     * @throws LifecycleExecutionException the lifecycle execution exception
-     * @throws PluginNotFoundException     the plugin not found exception
-     */
-    private Map<String, String> findMappingsForLifecycle(MavenProject project, Lifecycle lifecycle)
-            throws LifecycleExecutionException, PluginNotFoundException {
-        String packaging = project.getPackaging();
-        Map<String, String> mappings = null;
-
-        LifecycleMapping m = (LifecycleMapping) findExtension(
-                project, LifecycleMapping.ROLE, packaging, session.getSettings(), session.getLocalRepository());
-        if (m != null) {
-            mappings = m.getPhases(lifecycle.getId());
-        }
-
-        Map<String, String> defaultMappings = lifecycle.getDefaultPhases();
-
-        if (mappings == null) {
-            try {
-                m = container.lookup(LifecycleMapping.class, packaging);
-                mappings = m.getPhases(lifecycle.getId());
-            } catch (ComponentLookupException e) {
-                if (defaultMappings == null) {
-                    throw new LifecycleExecutionException(
-                            "Cannot find lifecycle mapping for packaging: '" + packaging + "'.", e);
-                }
-            }
-        }
-
-        if (mappings == null) {
-            if (defaultMappings == null) {
-                throw new LifecycleExecutionException(
-                        "Cannot find lifecycle mapping for packaging: '" + packaging + "', and there is no default");
-            } else {
-                mappings = defaultMappings;
-            }
-        }
-
-        return mappings;
-    }
-
-    /**
-     * Find extension.
-     *
-     * @param project         the project
-     * @param role            the role
-     * @param roleHint        the role hint
-     * @param settings        the settings
-     * @param localRepository the local repository
-     * @return the object
-     * @throws LifecycleExecutionException the lifecycle execution exception
-     * @throws PluginNotFoundException     the plugin not found exception
-     */
-    private Object findExtension(
-            MavenProject project, String role, String roleHint, Settings settings, ArtifactRepository localRepository)
-            throws LifecycleExecutionException, PluginNotFoundException {
-        Object pluginComponent = null;
-
-        List<Plugin> buildPlugins = project.getBuildPlugins();
-        for (Plugin plugin : buildPlugins) {
-            if (plugin.isExtensions()) {
-                verifyPlugin(plugin, project, settings, localRepository);
-
-                // TODO: if moved to the plugin manager we
-                // already have the descriptor from above
-                // and so do can lookup the container
-                // directly
-                try {
-                    pluginComponent = pluginManager.getPluginComponent(plugin, role, roleHint);
-
-                    if (pluginComponent != null) {
-                        break;
-                    }
-                } catch (ComponentLookupException e) {
-                    getLog().debug("Unable to find the lifecycle component in the extension " + e.getMessage());
-                } catch (PluginManagerException e) {
-                    throw new LifecycleExecutionException(
-                            "Error getting extensions from the plugin '" + plugin.getKey() + "': " + e.getMessage(), e);
-                }
-            }
-        }
-        return pluginComponent;
-    }
-
-    /**
-     * Verify plugin.
-     *
-     * @param plugin          the plugin
-     * @param project         the project
-     * @param settings        the settings
-     * @param localRepository the local repository
-     * @return the plugin descriptor
-     * @throws LifecycleExecutionException the lifecycle execution exception
-     * @throws PluginNotFoundException     the plugin not found exception
-     */
-    private void verifyPlugin(
-            Plugin plugin, MavenProject project, Settings settings, ArtifactRepository localRepository)
-            throws LifecycleExecutionException, PluginNotFoundException {
-        try {
-            pluginManager.verifyPlugin(plugin, project, settings, localRepository);
-        } catch (PluginManagerException e) {
-            throw new LifecycleExecutionException(
-                    "Internal error in the plugin manager getting plugin '" + plugin.getKey() + "': " + e.getMessage(),
-                    e);
-        } catch (PluginVersionResolutionException
-                | InvalidVersionSpecificationException
-                | InvalidPluginException
-                | PluginVersionNotFoundException
-                | org.apache.maven.artifact.resolver.ArtifactResolutionException
-                | ArtifactNotFoundException e) {
-            throw new LifecycleExecutionException(e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Gets all plugin entries in build.plugins, build.pluginManagement.plugins, profile.build.plugins, reporting and
-     * profile.reporting in this project and all parents
-     *
-     * @param project the project
-     * @return the all plugin entries wrapped in a PluginWrapper Object
-     */
-    private List<PluginWrapper> getAllPluginEntries(MavenProject project) {
+    private List<PluginWrapper> getAllPluginEntries(Project project) {
         List<PluginWrapper> plugins = new ArrayList<>();
         // now find all the plugin entries, either in
         // build.plugins or build.pluginManagement.plugins, profiles.plugins and reporting

@@ -24,22 +24,25 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.maven.api.Artifact;
+import org.apache.maven.api.Node;
+import org.apache.maven.api.NodeVisitor;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rules.utils.ArtifactUtils;
 import org.apache.maven.enforcer.rules.utils.ParentNodeProvider;
 import org.apache.maven.enforcer.rules.utils.ParentsVisitor;
-import org.eclipse.aether.artifact.Artifact;
-import org.eclipse.aether.graph.DependencyNode;
-import org.eclipse.aether.graph.DependencyVisitor;
 
 /**
  * @author Brian Fox
  */
-class DependencyVersionMap implements DependencyVisitor, ParentNodeProvider {
+class DependencyVersionMap implements NodeVisitor, ParentNodeProvider {
+    private final VersionParser versionParser;
     private ParentsVisitor parentsVisitor;
     private boolean uniqueVersions;
-    private final Map<String, List<DependencyNode>> idsToNode = new HashMap<>();
+    private final Map<String, List<Node>> idsToNode = new HashMap<>();
 
-    DependencyVersionMap() {
+    DependencyVersionMap(VersionParser versionParser) {
+        this.versionParser = versionParser;
         this.parentsVisitor = new ParentsVisitor();
     }
 
@@ -49,22 +52,22 @@ class DependencyVersionMap implements DependencyVisitor, ParentNodeProvider {
     }
 
     @Override
-    public boolean visitEnter(DependencyNode node) {
+    public boolean enter(Node node) {
         addDependency(node);
-        return parentsVisitor.visitEnter(node) && !containsConflicts(node);
+        return parentsVisitor.enter(node) && !containsConflicts(node);
     }
 
     @Override
-    public boolean visitLeave(DependencyNode node) {
-        return parentsVisitor.visitLeave(node);
+    public boolean leave(Node node) {
+        return parentsVisitor.leave(node);
     }
 
     @Override
-    public DependencyNode getParent(DependencyNode node) {
+    public Node getParent(Node node) {
         return parentsVisitor.getParent(node);
     }
 
-    private String constructKey(DependencyNode node) {
+    private String constructKey(Node node) {
         return constructKey(node.getArtifact());
     }
 
@@ -73,16 +76,16 @@ class DependencyVersionMap implements DependencyVisitor, ParentNodeProvider {
                 + artifact.getExtension();
     }
 
-    public void addDependency(DependencyNode node) {
+    public void addDependency(Node node) {
         String key = constructKey(node);
         idsToNode.computeIfAbsent(key, k -> new ArrayList<>()).add(node);
     }
 
     private String getVersion(Artifact artifact) {
-        return uniqueVersions ? artifact.getVersion() : artifact.getBaseVersion();
+        return (uniqueVersions ? artifact.getVersion() : artifact.getBaseVersion()).toString();
     }
 
-    private boolean containsConflicts(DependencyNode node) {
+    private boolean containsConflicts(Node node) {
         return containsConflicts(node.getArtifact());
     }
 
@@ -90,9 +93,9 @@ class DependencyVersionMap implements DependencyVisitor, ParentNodeProvider {
         return containsConflicts(idsToNode.get(constructKey(artifact)));
     }
 
-    private boolean containsConflicts(List<DependencyNode> nodes) {
+    private boolean containsConflicts(List<Node> nodes) {
         String version = null;
-        for (DependencyNode node : nodes) {
+        for (Node node : nodes) {
             if (version == null) {
                 version = getVersion(node.getArtifact());
             } else {
@@ -104,15 +107,15 @@ class DependencyVersionMap implements DependencyVisitor, ParentNodeProvider {
         return false;
     }
 
-    public List<List<DependencyNode>> getConflictedVersionNumbers(List<String> includes, List<String> excludes) {
+    public List<List<Node>> getConflictedVersionNumbers(List<String> includes, List<String> excludes) {
         List<String> formattedIncludes = formatPatterns(includes);
         List<String> formattedExcludes = formatPatterns(excludes);
-        List<List<DependencyNode>> output = new ArrayList<>();
-        for (List<DependencyNode> nodes : idsToNode.values()) {
-            List<DependencyNode> filteredNodes = nodes;
+        List<List<Node>> output = new ArrayList<>();
+        for (List<Node> nodes : idsToNode.values()) {
+            List<Node> filteredNodes = nodes;
             if (formattedIncludes != null || formattedExcludes != null) {
                 filteredNodes = new ArrayList<>();
-                for (DependencyNode node : nodes) {
+                for (Node node : nodes) {
                     if (includeArtifact(node, formattedIncludes, formattedExcludes)) {
                         filteredNodes.add(node);
                     }
@@ -125,11 +128,11 @@ class DependencyVersionMap implements DependencyVisitor, ParentNodeProvider {
         return output;
     }
 
-    private static boolean includeArtifact(DependencyNode node, List<String> includes, List<String> excludes) {
+    private boolean includeArtifact(Node node, List<String> includes, List<String> excludes) {
         boolean included = includes == null || includes.isEmpty();
         if (!included) {
             for (String pattern : includes) {
-                if (ArtifactUtils.compareDependency(pattern, ArtifactUtils.toArtifact(node))) {
+                if (ArtifactUtils.compareDependency(versionParser, pattern, ArtifactUtils.toArtifact(node))) {
                     included = true;
                     break;
                 }
@@ -141,7 +144,7 @@ class DependencyVersionMap implements DependencyVisitor, ParentNodeProvider {
         boolean excluded = false;
         if (excludes != null) {
             for (String pattern : excludes) {
-                if (ArtifactUtils.compareDependency(pattern, ArtifactUtils.toArtifact(node))) {
+                if (ArtifactUtils.compareDependency(versionParser, pattern, ArtifactUtils.toArtifact(node))) {
                     excluded = true;
                     break;
                 }

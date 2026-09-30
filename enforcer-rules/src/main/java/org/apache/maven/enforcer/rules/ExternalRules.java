@@ -18,8 +18,7 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
+import javax.xml.stream.XMLStreamException;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerConfigurationException;
 import javax.xml.transform.TransformerException;
@@ -33,18 +32,20 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Objects;
 
+import org.apache.maven.api.MojoExecution;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.xml.XmlNode;
+import org.apache.maven.api.xml.XmlService;
 import org.apache.maven.enforcer.rule.api.AbstractEnforcerRuleConfigProvider;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleError;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.ExpressionEvaluator;
-import org.apache.maven.plugin.MojoExecution;
-import org.codehaus.plexus.util.xml.Xpp3Dom;
-import org.codehaus.plexus.util.xml.Xpp3DomBuilder;
-import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 
 /**
  * An enforcer rule that will provide rules configuration from an external resource.
@@ -145,16 +146,17 @@ public final class ExternalRules extends AbstractEnforcerRuleConfigProvider {
     }
 
     @Override
-    public Xpp3Dom getRulesConfig() throws EnforcerRuleError {
+    public XmlNode getRulesConfig() throws EnforcerRuleError {
 
-        try (InputStream descriptorStream = transform(location, resolveDescriptor(location), xsltLocation)) {
-            Xpp3Dom enforcerRules = Xpp3DomBuilder.build(descriptorStream, "UTF-8");
-            if (enforcerRules.getChildCount() == 1 && "enforcer".equals(enforcerRules.getName())) {
-                return enforcerRules.getChild(0);
+        try (InputStream descriptorStream = transform(location, resolveDescriptor(location), xsltLocation);
+                InputStreamReader descriptorReader = new InputStreamReader(descriptorStream, StandardCharsets.UTF_8)) {
+            XmlNode enforcerRules = XmlService.read(descriptorReader);
+            if (enforcerRules.children().size() == 1 && "enforcer".equals(enforcerRules.name())) {
+                return enforcerRules.children().get(0);
             } else {
                 throw new EnforcerRuleError("Enforcer rules configuration not found in: " + location);
             }
-        } catch (IOException | XmlPullParserException e) {
+        } catch (IOException | XMLStreamException e) {
             throw new EnforcerRuleError(e);
         }
     }
@@ -165,7 +167,7 @@ public final class ExternalRules extends AbstractEnforcerRuleConfigProvider {
             if (path.startsWith(LOCATION_PREFIX_CLASSPATH)) {
                 String classpathLocation = path.substring(LOCATION_PREFIX_CLASSPATH.length());
                 getLog().debug("Read rules form classpath location: " + classpathLocation);
-                ClassLoader classRealm = mojoExecution.getMojoDescriptor().getRealm();
+                ClassLoader classRealm = mojoExecution.getPlugin().getClassLoader();
                 descriptorStream = classRealm.getResourceAsStream(classpathLocation);
                 if (descriptorStream == null) {
                     throw new EnforcerRuleError("Location '" + classpathLocation + "' not found in classpath");

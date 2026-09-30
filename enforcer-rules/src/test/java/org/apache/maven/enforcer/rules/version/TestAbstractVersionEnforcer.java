@@ -18,10 +18,10 @@
  */
 package org.apache.maven.enforcer.rules.version;
 
-import org.apache.maven.artifact.versioning.ArtifactVersion;
-import org.apache.maven.artifact.versioning.DefaultArtifactVersion;
+import org.apache.maven.api.Version;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
+import org.apache.maven.enforcer.rules.EnforcerTestUtils;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.fail;
@@ -42,7 +42,7 @@ class TestAbstractVersionEnforcer {
      * @param range the range
      * @param version the version
      */
-    private void enforceFalse(AbstractVersionEnforcer rule, String var, String range, ArtifactVersion version) {
+    private void enforceFalse(AbstractVersionEnforcer rule, String var, String range, Version version) {
         try {
             rule.enforceVersion(var, range, version);
             fail("Expected to receive EnforcerRuleException because:" + version + " is not contained by " + range);
@@ -56,10 +56,10 @@ class TestAbstractVersionEnforcer {
      */
     @Test
     void testEnforceVersion() throws Exception {
-        RequireJavaVersion rule = new RequireJavaVersion();
+        RequireJavaVersion rule = new RequireJavaVersion(EnforcerTestUtils.getVersionParser());
         rule.setLog(mock(EnforcerLogger.class));
 
-        ArtifactVersion version = new DefaultArtifactVersion("2.0.5");
+        Version version = EnforcerTestUtils.getVersionParser().parseVersion("2.0.5");
 
         // test ranges
         rule.enforceVersion("test", "[2.0.5,)", version);

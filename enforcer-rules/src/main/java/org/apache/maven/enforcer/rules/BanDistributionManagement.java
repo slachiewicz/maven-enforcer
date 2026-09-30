@@ -18,14 +18,15 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.Objects;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.DistributionManagement;
+import org.apache.maven.api.services.xml.ModelXmlFactory;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.model.DistributionManagement;
-import org.apache.maven.project.MavenProject;
+import org.apache.maven.enforcer.rules.utils.OriginalModels;
 
 /**
  * This rule will check if a pom contains a <code>distributionManagement</code> part. This should be by best practice
@@ -53,30 +54,33 @@ public final class BanDistributionManagement extends AbstractStandardEnforcerRul
      */
     private boolean allowSite = false;
 
-    private final MavenProject project;
+    private final Project project;
+
+    private final ModelXmlFactory modelXmlFactory;
 
     @Inject
-    public BanDistributionManagement(MavenProject project) {
+    public BanDistributionManagement(Project project, ModelXmlFactory modelXmlFactory) {
         this.project = Objects.requireNonNull(project);
+        this.modelXmlFactory = Objects.requireNonNull(modelXmlFactory);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
 
-        if (project.isExecutionRoot()) {
-            if (project.getParent() == null) {
+        if (project.isTopProject()) {
+            if (!project.getParent().isPresent()) {
                 // Does it make sense to check something? If yes please make a JIRA ticket for it.
                 getLog().debug("We have no parent and in the root of a build we don't check anything,");
                 getLog().debug("because that is the location where we defined maven-enforcer-plugin.");
             } else {
                 getLog().debug("We are in the root of the execution and we have a parent.");
 
-                DistributionManagementCheck check = new DistributionManagementCheck(project);
+                DistributionManagementCheck check = new DistributionManagementCheck(project, modelXmlFactory);
                 executeCheck(check);
             }
         } else {
             getLog().debug("We are in a deeper level.");
-            DistributionManagementCheck check = new DistributionManagementCheck(project);
+            DistributionManagementCheck check = new DistributionManagementCheck(project, modelXmlFactory);
             executeCheck(check);
         }
     }
@@ -119,8 +123,9 @@ public final class BanDistributionManagement extends AbstractStandardEnforcerRul
     private static class DistributionManagementCheck {
         private DistributionManagement distributionManagement;
 
-        DistributionManagementCheck(MavenProject project) {
-            this.distributionManagement = project.getOriginalModel().getDistributionManagement();
+        DistributionManagementCheck(Project project, ModelXmlFactory modelXmlFactory) throws EnforcerRuleException {
+            this.distributionManagement =
+                    OriginalModels.read(modelXmlFactory, project).getDistributionManagement();
         }
 
         public void execute(boolean isAllowRepository, boolean isAllowSnapshotRepository, boolean isAllowSite)

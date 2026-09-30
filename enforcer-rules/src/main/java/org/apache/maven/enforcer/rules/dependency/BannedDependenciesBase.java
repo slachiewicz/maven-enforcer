@@ -25,13 +25,13 @@ import java.util.Objects;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.maven.artifact.Artifact;
+import org.apache.maven.api.Artifact;
+import org.apache.maven.api.Node;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.AbstractStandardEnforcerRule;
 import org.apache.maven.enforcer.rules.utils.ArtifactMatcher.MatchingArtifact;
 import org.apache.maven.enforcer.rules.utils.ArtifactUtils;
-import org.apache.maven.execution.MavenSession;
-import org.eclipse.aether.graph.DependencyNode;
 
 /**
  * Abstract base class for rules which validate the transitive
@@ -69,30 +69,33 @@ abstract class BannedDependenciesBase extends AbstractStandardEnforcerRule {
     /** Specify if transitive dependencies should be searched (default) or only look at direct dependencies. */
     private boolean searchTransitive = true;
 
-    private final MavenSession session;
-
     private final ResolverUtil resolverUtil;
 
-    BannedDependenciesBase(MavenSession session, ResolverUtil resolverUtil) {
-        this.session = Objects.requireNonNull(session);
+    private final VersionParser versionParser;
+
+    BannedDependenciesBase(ResolverUtil resolverUtil, VersionParser versionParser) {
         this.resolverUtil = Objects.requireNonNull(resolverUtil);
+        this.versionParser = Objects.requireNonNull(versionParser);
     }
 
-    protected MavenSession getSession() {
-        return session;
+    protected VersionParser getVersionParser() {
+        return versionParser;
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
 
         if (!searchTransitive) {
-            String result = session.getCurrentProject().getDependencyArtifacts().stream()
+            // the direct dependencies, resolved by Maven, the same as the children of the root node
+            Node root = resolverUtil.resolveTransitiveDependencies(false, false, false, Collections.emptyList());
+            String result = root.getChildren().stream()
+                    .map(ArtifactUtils::toArtifact)
                     .filter(a -> !validate(a))
                     .collect(
                             StringBuilder::new,
                             (messageBuilder, node) -> messageBuilder
                                     .append(System.lineSeparator())
-                                    .append(node.getId())
+                                    .append(ArtifactUtils.getId(node))
                                     .append(" <--- ")
                                     .append(getErrorMessage()),
                             (m1, m2) -> m1.append(m2.toString()))
@@ -106,8 +109,7 @@ abstract class BannedDependenciesBase extends AbstractStandardEnforcerRule {
             }
         } else {
             StringBuilder messageBuilder = new StringBuilder();
-            DependencyNode rootNode =
-                    resolverUtil.resolveTransitiveDependencies(true, false, false, Collections.emptyList());
+            Node rootNode = resolverUtil.resolveTransitiveDependencies(true, false, false, Collections.emptyList());
 
             Set<MatchingArtifact> visitedArtifacts = new HashSet<>();
             if (!validate(rootNode, 0, messageBuilder, visitedArtifacts)) {
@@ -121,7 +123,7 @@ abstract class BannedDependenciesBase extends AbstractStandardEnforcerRule {
     }
 
     protected boolean validate(
-            DependencyNode node, int level, StringBuilder messageBuilder, Set<MatchingArtifact> visitedArtifacts) {
+            Node node, int level, StringBuilder messageBuilder, Set<MatchingArtifact> visitedArtifacts) {
         Artifact artifact = ArtifactUtils.toArtifact(node);
         boolean rootFailed = false;
         if (level > 0 && visitedArtifacts.add(new MatchingArtifact(artifact))) {
@@ -132,9 +134,7 @@ abstract class BannedDependenciesBase extends AbstractStandardEnforcerRule {
                         .map(childNode -> validate(childNode, level + 1, childMessageBuilder, visitedArtifacts))
                         .reduce(true, Boolean::logicalAnd)
                 || rootFailed) {
-            messageBuilder
-                    .append(StringUtils.repeat("   ", level))
-                    .append(ArtifactUtils.toArtifact(node).getId());
+            messageBuilder.append(StringUtils.repeat("   ", level)).append(ArtifactUtils.getId(artifact));
             if (rootFailed) {
                 messageBuilder.append(" <--- ").append(getErrorMessage());
             }

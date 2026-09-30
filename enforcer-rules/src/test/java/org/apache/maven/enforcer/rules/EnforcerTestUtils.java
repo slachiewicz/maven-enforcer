@@ -18,26 +18,25 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import java.util.Properties;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
+import org.apache.maven.api.Node;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.model.InputLocation;
+import org.apache.maven.api.model.InputSource;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.Plugin;
+import org.apache.maven.api.services.VersionParser;
+import org.apache.maven.api.services.xml.ModelXmlFactory;
+import org.apache.maven.api.services.xml.XmlReaderRequest;
 import org.apache.maven.enforcer.rules.utils.DependencyNodeBuilder;
-import org.apache.maven.execution.MavenExecutionRequest;
-import org.apache.maven.execution.MavenExecutionResult;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.model.InputLocation;
-import org.apache.maven.model.InputSource;
-import org.apache.maven.model.Plugin;
-import org.apache.maven.project.ProjectBuildingRequest;
-import org.codehaus.plexus.PlexusContainer;
-import org.codehaus.plexus.classworlds.ClassWorld;
-import org.codehaus.plexus.classworlds.realm.ClassRealm;
-import org.eclipse.aether.DefaultRepositorySystemSession;
-import org.eclipse.aether.graph.DependencyNode;
+import org.apache.maven.impl.standalone.ApiRunner;
 
-import static org.apache.maven.artifact.Artifact.SCOPE_TEST;
-import static org.mockito.Mockito.any;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * The Class EnforcerTestUtils.
@@ -46,27 +45,29 @@ import static org.mockito.Mockito.when;
  */
 public final class EnforcerTestUtils {
 
+    private static Session session;
+
+    private EnforcerTestUtils() {}
+
     /**
-     * Gets the maven session.
+     * Gets a real session with the services of the Maven 4 implementation, for example to parse versions.
      *
-     * @return the maven session
+     * @return the session
      */
-    public static MavenSession getMavenSession() {
-        PlexusContainer mock = mock(PlexusContainer.class);
+    public static synchronized Session getRealSession() {
+        if (session == null) {
+            session = ApiRunner.createSession();
+        }
+        return session;
+    }
 
-        MavenExecutionRequest mer = mock(MavenExecutionRequest.class);
-        ProjectBuildingRequest buildingRequest = mock(ProjectBuildingRequest.class);
-        when(buildingRequest.setRepositorySession(any())).thenReturn(buildingRequest);
-        when(mer.getProjectBuildingRequest()).thenReturn(buildingRequest);
-
-        Properties systemProperties = new Properties();
-        systemProperties.put("maven.version", "3.0");
-        when(mer.getUserProperties()).thenReturn(new Properties());
-        when(mer.getSystemProperties()).thenReturn(systemProperties);
-
-        MavenExecutionResult meResult = mock(MavenExecutionResult.class);
-
-        return new MavenSession(mock, new DefaultRepositorySystemSession(), mer, meResult);
+    /**
+     * Gets the real parser of versions.
+     *
+     * @return the version parser
+     */
+    public static VersionParser getVersionParser() {
+        return getRealSession().getService(VersionParser.class);
     }
 
     /**
@@ -78,20 +79,42 @@ public final class EnforcerTestUtils {
      * @return the plugin
      */
     public static Plugin newPlugin(String groupId, String artifactId, String version) {
-        InputSource inputSource = new InputSource();
-        inputSource.setModelId("unit");
-
-        Plugin plugin = new Plugin();
-        plugin.setArtifactId(artifactId);
-        plugin.setGroupId(groupId);
-        plugin.setVersion(version);
-        plugin.setLocation("version", new InputLocation(0, 0, inputSource));
-        return plugin;
+        InputSource inputSource = new InputSource("unit", null);
+        return Plugin.newBuilder()
+                .groupId(groupId)
+                .artifactId(artifactId)
+                .version(version)
+                .location("version", InputLocation.of(0, 0, inputSource))
+                .build();
     }
 
-    public static DependencyNode getDependencyNodeWithMultipleSnapshots() {
+    /**
+     * A factory which reads always the given model, as the original model of any project.
+     *
+     * @param model the model
+     * @return the factory
+     */
+    public static ModelXmlFactory modelXmlFactory(Model model) {
+        ModelXmlFactory factory = mock(ModelXmlFactory.class);
+        lenient().when(factory.read(any(XmlReaderRequest.class))).thenReturn(model);
+        return factory;
+    }
+
+    /**
+     * A project with a pom file, which can be read by the factory of models.
+     *
+     * @return the project
+     */
+    public static Project mockProject() {
+        Project project = mock(Project.class);
+        Path pomPath = Paths.get("pom.xml");
+        lenient().when(project.getPomPath()).thenReturn(pomPath);
+        return project;
+    }
+
+    public static Node getDependencyNodeWithMultipleSnapshots() {
         return new DependencyNodeBuilder()
-                .withType(DependencyNodeBuilder.Type.POM)
+                .withType(DependencyNodeBuilder.NodeType.POM)
                 .withChildNode(new DependencyNodeBuilder()
                         .withArtifactId("childA")
                         .withVersion("1.0.0")
@@ -107,9 +130,9 @@ public final class EnforcerTestUtils {
                 .build();
     }
 
-    public static DependencyNode getDependencyNodeWithOptionalSnapshot() {
+    public static Node getDependencyNodeWithOptionalSnapshot() {
         return new DependencyNodeBuilder()
-                .withType(DependencyNodeBuilder.Type.POM)
+                .withType(DependencyNodeBuilder.NodeType.POM)
                 .withChildNode(new DependencyNodeBuilder()
                         .withArtifactId("childA")
                         .withVersion("1.0.0")
@@ -127,28 +150,23 @@ public final class EnforcerTestUtils {
                 .build();
     }
 
-    public static DependencyNode getDependencyNodeWithMultipleTestSnapshots() {
+    public static Node getDependencyNodeWithMultipleTestSnapshots() {
         return new DependencyNodeBuilder()
-                .withType(DependencyNodeBuilder.Type.POM)
+                .withType(DependencyNodeBuilder.NodeType.POM)
                 .withChildNode(new DependencyNodeBuilder()
                         .withArtifactId("childA")
                         .withVersion("1.0.0")
                         .withChildNode(new DependencyNodeBuilder()
                                 .withArtifactId("childAA")
                                 .withVersion("1.0.0-SNAPSHOT")
-                                .withScope(SCOPE_TEST)
+                                .withScope("test")
                                 .build())
                         .build())
                 .withChildNode(new DependencyNodeBuilder()
                         .withArtifactId("childB")
                         .withVersion("2.0.0-SNAPSHOT")
-                        .withScope(SCOPE_TEST)
+                        .withScope("test")
                         .build())
                 .build();
-    }
-
-    public static ClassRealm getTestClassRealm() {
-        ClassWorld classWorld = new ClassWorld("test", EnforcerTestUtils.class.getClassLoader());
-        return classWorld.getClassRealm("test");
     }
 }

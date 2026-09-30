@@ -18,15 +18,16 @@
  */
 package org.apache.maven.enforcer.rules.files;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.io.File;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Objects;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.services.ProjectManager;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.project.MavenProject;
 
 /**
  * Rule to validate the main artifact is within certain size constraints.
@@ -51,11 +52,14 @@ public final class RequireFilesSize extends AbstractRequireFiles {
     /** The error msg. */
     private String errorMsg;
 
-    private final MavenProject project;
+    private final Project project;
+
+    private final ProjectManager projectManager;
 
     @Inject
-    public RequireFilesSize(MavenProject project) {
+    public RequireFilesSize(Project project, ProjectManager projectManager) {
         this.project = Objects.requireNonNull(project);
+        this.projectManager = Objects.requireNonNull(projectManager);
     }
 
     @Override
@@ -63,7 +67,8 @@ public final class RequireFilesSize extends AbstractRequireFiles {
 
         // if the file is already defined, use that. Otherwise get the main artifact.
         if (getFiles().isEmpty()) {
-            setFilesList(Collections.singletonList(project.getArtifact().getFile()));
+            setFilesList(Collections.singletonList(
+                    projectManager.getPath(project).map(Path::toFile).orElse(null)));
             super.execute();
         } else {
             super.execute();

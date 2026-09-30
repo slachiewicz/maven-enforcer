@@ -23,31 +23,31 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
-import org.eclipse.aether.graph.DependencyNode;
-import org.eclipse.aether.graph.DependencyVisitor;
+import org.apache.maven.api.Node;
+import org.apache.maven.api.NodeVisitor;
 
 /**
- * A {@link DependencyVisitor} building a map of parent nodes
+ * A {@link NodeVisitor} building a map of parent nodes
  */
-public class ParentsVisitor implements DependencyVisitor, ParentNodeProvider {
+public class ParentsVisitor implements NodeVisitor, ParentNodeProvider {
 
-    private final Map<DependencyNode, DependencyNode> parents = new HashMap<>();
-    private final Deque<DependencyNode> parentStack = new ConcurrentLinkedDeque<>();
+    private final Map<Node, Node> parents = new HashMap<>();
+    private final Deque<Node> parentStack = new ConcurrentLinkedDeque<>();
 
     @Override
-    public DependencyNode getParent(DependencyNode node) {
+    public Node getParent(Node node) {
         return parents.get(node);
     }
 
     @Override
-    public boolean visitEnter(DependencyNode node) {
+    public boolean enter(Node node) {
         parents.put(node, parentStack.isEmpty() ? null : parentStack.peek());
         parentStack.push(node);
         return true;
     }
 
     @Override
-    public boolean visitLeave(DependencyNode node) {
+    public boolean leave(Node node) {
         parentStack.pop();
         return true;
     }

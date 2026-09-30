@@ -18,13 +18,13 @@
  */
 package org.apache.maven.enforcer.rules.version;
 
+import org.apache.maven.api.Session;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.rtinfo.RuntimeInformation;
+import org.apache.maven.enforcer.rules.EnforcerTestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -41,16 +41,16 @@ import static org.mockito.Mockito.when;
 class TestMavenVersion {
 
     @Mock
-    private RuntimeInformation runtimeInformation;
+    private Session session;
 
     @Mock
     private EnforcerLogger log;
 
-    @InjectMocks
     private RequireMavenVersion rule;
 
     @BeforeEach
     void setup() {
+        rule = new RequireMavenVersion(EnforcerTestUtils.getVersionParser(), session);
         rule.setLog(log);
     }
 
@@ -62,7 +62,8 @@ class TestMavenVersion {
     @Test
     void testRule() throws EnforcerRuleException {
 
-        when(runtimeInformation.getMavenVersion()).thenReturn("3.0");
+        when(session.getMavenVersion())
+                .thenReturn(EnforcerTestUtils.getVersionParser().parseVersion("3.0"));
 
         rule.setVersion("2.0.5");
 
@@ -92,11 +93,13 @@ class TestMavenVersion {
     @Test
     void checkRequireVersionMatrix() throws EnforcerRuleException {
 
-        when(runtimeInformation.getMavenVersion()).thenReturn("3.6.1");
+        when(session.getMavenVersion())
+                .thenReturn(EnforcerTestUtils.getVersionParser().parseVersion("3.6.1"));
         rule.setVersion("3.6.0");
         rule.execute();
 
-        when(runtimeInformation.getMavenVersion()).thenReturn("3.6.2");
+        when(session.getMavenVersion())
+                .thenReturn(EnforcerTestUtils.getVersionParser().parseVersion("3.6.2"));
         rule.setVersion("3.6.0");
         rule.execute();
         rule.setVersion("3.6.1");

@@ -20,9 +20,10 @@ package org.apache.maven.enforcer.rules.checksum;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.codehaus.plexus.util.FileUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -44,7 +45,7 @@ class TestRequireFileChecksum {
     @Test
     void testFileChecksumMd5() throws IOException, EnforcerRuleException {
         File f = File.createTempFile("junit", null, temporaryFolder);
-        FileUtils.fileWrite(f, "message");
+        FileUtils.write(f, "message", StandardCharsets.UTF_8);
 
         rule.setFile(f);
         rule.setChecksum("78e731027d8fd50ed642340b7c9a63b3");
@@ -56,7 +57,7 @@ class TestRequireFileChecksum {
     @Test
     void testFileChecksumMd5UpperCase() throws IOException, EnforcerRuleException {
         File f = File.createTempFile("junit", null, temporaryFolder);
-        FileUtils.fileWrite(f, "message");
+        FileUtils.write(f, "message", StandardCharsets.UTF_8);
 
         rule.setFile(f);
         rule.setChecksum("78E731027D8FD50ED642340B7C9A63B3");
@@ -169,7 +170,7 @@ class TestRequireFileChecksum {
     void testFileChecksumMd5ChecksumMismatchFailure() throws IOException {
         File f = File.createTempFile("junit", null, temporaryFolder);
         Throwable exception = assertThrows(EnforcerRuleException.class, () -> {
-            FileUtils.fileWrite(f, "message");
+            FileUtils.write(f, "message", StandardCharsets.UTF_8);
 
             rule.setFile(f);
             rule.setChecksum("ffeeddccbbaa99887766554433221100");
@@ -188,7 +189,7 @@ class TestRequireFileChecksum {
         String configuredMessage = "testMessage";
         Throwable exception = assertThrows(EnforcerRuleException.class, () -> {
             File f = File.createTempFile("junit", null, temporaryFolder);
-            FileUtils.fileWrite(f, "message");
+            FileUtils.write(f, "message", StandardCharsets.UTF_8);
 
             rule.setFile(f);
             rule.setChecksum("ffeeddccbbaa99887766554433221100");
@@ -203,7 +204,7 @@ class TestRequireFileChecksum {
     @Test
     void testFileChecksumSha1() throws IOException, EnforcerRuleException {
         File f = File.createTempFile("junit", null, temporaryFolder);
-        FileUtils.fileWrite(f, "message");
+        FileUtils.write(f, "message", StandardCharsets.UTF_8);
 
         rule.setFile(f);
         rule.setChecksum("6f9b9af3cd6e8b8a73c2cdced37fe9f59226e27d");
@@ -215,7 +216,7 @@ class TestRequireFileChecksum {
     @Test
     void testFileChecksumSha256() throws IOException, EnforcerRuleException {
         File f = File.createTempFile("junit", null, temporaryFolder);
-        FileUtils.fileWrite(f, "message");
+        FileUtils.write(f, "message", StandardCharsets.UTF_8);
 
         rule.setFile(f);
         rule.setChecksum("ab530a13e45914982b79f9b7e3fba994cfd1f3fb22f71cea1afbf02b460c6d1d");
@@ -227,7 +228,7 @@ class TestRequireFileChecksum {
     @Test
     void testFileChecksumSha384() throws IOException, EnforcerRuleException {
         File f = File.createTempFile("junit", null, temporaryFolder);
-        FileUtils.fileWrite(f, "message");
+        FileUtils.write(f, "message", StandardCharsets.UTF_8);
 
         rule.setFile(f);
         rule.setChecksum(
@@ -240,7 +241,7 @@ class TestRequireFileChecksum {
     @Test
     void testFileChecksumSha512() throws IOException, EnforcerRuleException {
         File f = File.createTempFile("junit", null, temporaryFolder);
-        FileUtils.fileWrite(f, "message");
+        FileUtils.write(f, "message", StandardCharsets.UTF_8);
 
         rule.setFile(f);
         rule.setChecksum(

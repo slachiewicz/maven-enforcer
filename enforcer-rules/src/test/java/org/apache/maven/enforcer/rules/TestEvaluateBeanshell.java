@@ -21,7 +21,6 @@ package org.apache.maven.enforcer.rules;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.ExpressionEvaluator;
-import org.codehaus.plexus.component.configurator.expression.ExpressionEvaluationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -99,7 +98,7 @@ class TestEvaluateBeanshell {
         rule.setCondition("${env} == null");
         rule.setMessage("We have a variable : ${env}");
 
-        when(evaluator.evaluate(rule.getCondition())).thenThrow(new ExpressionEvaluationException("expected error"));
+        when(evaluator.evaluate(rule.getCondition())).thenThrow(new IllegalStateException("expected error"));
         try {
             rule.execute();
             fail("Expected an exception.");

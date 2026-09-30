@@ -18,7 +18,7 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Named;
+import org.apache.maven.api.di.Named;
 
 /**
  * Always pass. This rule is useful for testing the Enforcer configuration.

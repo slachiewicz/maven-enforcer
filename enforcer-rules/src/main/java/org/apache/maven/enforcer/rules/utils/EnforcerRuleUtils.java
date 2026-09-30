@@ -18,87 +18,68 @@
  */
 package org.apache.maven.enforcer.rules.utils;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import org.apache.maven.model.Plugin;
-import org.apache.maven.model.ReportPlugin;
-import org.codehaus.plexus.component.configurator.expression.ExpressionEvaluationException;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Plugin;
+import org.apache.maven.api.model.ReportPlugin;
 
 /**
- * The Class EnforcerRuleUtils.
+ * Resolves expressions in the coordinates of plugins.
  *
- * @author <a href="mailto:brianf@apache.org">Brian Fox</a>
+ * @author Slawomir Jaranowski
+ * @since 3.2.0
  */
 @Named
 public class EnforcerRuleUtils {
 
     private final ExpressionEvaluator evaluator;
-    /**
-     * Instantiates a new enforcer rule utils.
-     *
-     * @param evaluator the expression evaluator
-     */
+
     @Inject
     public EnforcerRuleUtils(ExpressionEvaluator evaluator) {
         this.evaluator = Objects.requireNonNull(evaluator);
     }
 
-    private void resolve(Plugin plugin) {
-        try {
-            plugin.setGroupId((String) evaluator.evaluate(plugin.getGroupId()));
-            plugin.setArtifactId((String) evaluator.evaluate(plugin.getArtifactId()));
-            plugin.setVersion((String) evaluator.evaluate(plugin.getVersion()));
-        } catch (ExpressionEvaluationException e) {
-            // this should have gone already before
-        }
+    private Plugin resolve(Plugin plugin) {
+        return plugin.withGroupId((String) evaluator.evaluate(plugin.getGroupId()))
+                .withArtifactId((String) evaluator.evaluate(plugin.getArtifactId()))
+                .withVersion((String) evaluator.evaluate(plugin.getVersion()));
     }
 
-    private void resolve(ReportPlugin plugin) {
-        try {
-            plugin.setGroupId((String) evaluator.evaluate(plugin.getGroupId()));
-            plugin.setArtifactId((String) evaluator.evaluate(plugin.getArtifactId()));
-            plugin.setVersion((String) evaluator.evaluate(plugin.getVersion()));
-        } catch (ExpressionEvaluationException e) {
-            // this should have gone already before
-        }
+    private ReportPlugin resolve(ReportPlugin plugin) {
+        return plugin.withGroupId((String) evaluator.evaluate(plugin.getGroupId()))
+                .withArtifactId((String) evaluator.evaluate(plugin.getArtifactId()))
+                .withVersion((String) evaluator.evaluate(plugin.getVersion()));
     }
 
     /**
-     * Resolves expressions in the given plugins. The input plugins belong to the project model and are not changed;
-     * the result holds resolved copies.
+     * Resolves expressions in the coordinates of plugins.
      *
-     * @param plugins the plugins to resolve
-     * @return resolved copies of the plugins
+     * @param plugins the plugins
+     * @return new plugins, the given ones are immutable
      */
     public List<Plugin> resolvePlugins(List<Plugin> plugins) {
-        List<Plugin> resolved = new ArrayList<>(plugins.size());
+        List<Plugin> result = new ArrayList<>(plugins.size());
         for (Plugin plugin : plugins) {
-            Plugin copy = plugin.clone();
-            resolve(copy);
-            resolved.add(copy);
+            result.add(resolve(plugin));
         }
-        return resolved;
+        return result;
     }
 
     /**
-     * Resolves expressions in the given report plugins. The input plugins belong to the project model and are not
-     * changed; the result holds resolved copies.
+     * Resolves expressions in the coordinates of report plugins.
      *
-     * @param reportPlugins the report plugins to resolve
-     * @return resolved copies of the report plugins
+     * @param reportPlugins the report plugins
+     * @return new report plugins, the given ones are immutable
      */
     public List<ReportPlugin> resolveReportPlugins(List<ReportPlugin> reportPlugins) {
-        List<ReportPlugin> resolved = new ArrayList<>(reportPlugins.size());
+        List<ReportPlugin> result = new ArrayList<>(reportPlugins.size());
         for (ReportPlugin plugin : reportPlugins) {
-            ReportPlugin copy = plugin.clone();
-            resolve(copy);
-            resolved.add(copy);
+            result.add(resolve(plugin));
         }
-        return resolved;
+        return result;
     }
 }

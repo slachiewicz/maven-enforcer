@@ -20,14 +20,14 @@ package org.apache.maven.enforcer.rules;
 
 import java.util.Collections;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.Prerequisites;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.model.Prerequisites;
-import org.apache.maven.project.MavenProject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -40,18 +40,27 @@ import static org.mockito.Mockito.when;
 class RequirePrerequisiteTest {
 
     @Mock
-    private MavenProject project;
+    private Project project;
 
     @Mock
     private EnforcerLogger log;
 
-    @InjectMocks
     private RequirePrerequisite rule;
+
+    private String packaging = "maven-plugin";
+
+    private Prerequisites prerequisites;
 
     @BeforeEach
     void before() {
+        rule = new RequirePrerequisite(project, EnforcerTestUtils.getVersionParser());
         rule.setLog(log);
-        when(project.getPackaging()).thenReturn("maven-plugin");
+        // the model is created when the project is asked for it, after the test is set up
+        when(project.getModel())
+                .thenAnswer(i -> Model.newBuilder()
+                        .packaging(packaging)
+                        .prerequisites(prerequisites)
+                        .build());
     }
 
     @Test
@@ -72,13 +81,13 @@ class RequirePrerequisiteTest {
 
     @Test
     void testNoSpecifiedPrerequisite() throws Exception {
-        when(project.getPrerequisites()).thenReturn(new Prerequisites());
+        prerequisites = Prerequisites.newInstance();
         rule.execute();
     }
 
     @Test
     void testLowerMavenPrerequisite() {
-        when(project.getPrerequisites()).thenReturn(new Prerequisites());
+        prerequisites = Prerequisites.newInstance();
 
         assertThrows(EnforcerRuleException.class, () -> {
             rule.setMavenVersion("3.0");
@@ -88,7 +97,7 @@ class RequirePrerequisiteTest {
 
     @Test
     void testLowerMavenRangePrerequisite() {
-        when(project.getPrerequisites()).thenReturn(new Prerequisites());
+        prerequisites = Prerequisites.newInstance();
 
         assertThrows(EnforcerRuleException.class, () -> {
             rule.setMavenVersion("[3.0,)");
@@ -99,9 +108,7 @@ class RequirePrerequisiteTest {
     @Test
     void testMavenRangesPrerequisite() {
         assertThrows(EnforcerRuleException.class, () -> {
-            Prerequisites prerequisites = new Prerequisites();
-            prerequisites.setMaven("2.2.0");
-            when(project.getPrerequisites()).thenReturn(prerequisites);
+            prerequisites = Prerequisites.newBuilder().maven("2.2.0").build();
 
             rule.setMavenVersion("[2.0.6,2.1.0),(2.1.0,2.2.0),(2.2.0,)");
             rule.execute();
@@ -110,9 +117,7 @@ class RequirePrerequisiteTest {
 
     @Test
     void testValidPrerequisite() throws Exception {
-        Prerequisites prerequisites = new Prerequisites();
-        prerequisites.setMaven("3.0");
-        when(project.getPrerequisites()).thenReturn(prerequisites);
+        prerequisites = Prerequisites.newBuilder().maven("3.0").build();
 
         rule.setMavenVersion("2.2.1");
         rule.execute();
@@ -120,7 +125,7 @@ class RequirePrerequisiteTest {
 
     @Test
     void testPomPackaging() throws Exception {
-        when(project.getPackaging()).thenReturn("pom");
+        packaging = "pom";
 
         rule.execute();
 
@@ -130,7 +135,7 @@ class RequirePrerequisiteTest {
     @Test
     void testMatchingPackagings() {
         assertThrows(EnforcerRuleException.class, () -> {
-            when(project.getPackaging()).thenReturn("maven-plugin");
+            packaging = "maven-plugin";
 
             rule.setPackagings(Collections.singletonList("maven-plugin"));
             rule.execute();
@@ -139,7 +144,7 @@ class RequirePrerequisiteTest {
 
     @Test
     void testNotMatchingPackagings() throws Exception {
-        when(project.getPackaging()).thenReturn("jar");
+        packaging = "jar";
 
         rule.setPackagings(Collections.singletonList("maven-plugin"));
         rule.execute();

@@ -18,17 +18,19 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.List;
 import java.util.Objects;
 
-import org.apache.maven.artifact.versioning.InvalidVersionSpecificationException;
-import org.apache.maven.artifact.versioning.VersionRange;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Version;
+import org.apache.maven.api.VersionConstraint;
+import org.apache.maven.api.VersionRange;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Prerequisites;
+import org.apache.maven.api.services.VersionParser;
+import org.apache.maven.api.services.VersionParserException;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.model.Prerequisites;
-import org.apache.maven.project.MavenProject;
 
 /**
  * @author Robert Scholte
@@ -48,11 +50,14 @@ public final class RequirePrerequisite extends AbstractStandardEnforcerRule {
      */
     private String mavenVersion;
 
-    private final MavenProject project;
+    private final Project project;
+
+    private final VersionParser versionParser;
 
     @Inject
-    public RequirePrerequisite(MavenProject project) {
+    public RequirePrerequisite(Project project, VersionParser versionParser) {
         this.project = Objects.requireNonNull(project);
+        this.versionParser = Objects.requireNonNull(versionParser);
     }
 
     /**
@@ -78,17 +83,19 @@ public final class RequirePrerequisite extends AbstractStandardEnforcerRule {
     public void execute() throws EnforcerRuleException {
         try {
 
-            if ("pom".equals(project.getPackaging())) {
+            String packaging = project.getModel().getPackaging();
+
+            if ("pom".equals(packaging)) {
                 getLog().debug("Packaging is pom, skipping requirePrerequisite rule");
                 return;
             }
 
-            if (packagings != null && !packagings.contains(project.getPackaging())) {
-                getLog().debug("Packaging is " + project.getPackaging() + ", skipping requirePrerequisite rule");
+            if (packagings != null && !packagings.contains(packaging)) {
+                getLog().debug("Packaging is " + packaging + ", skipping requirePrerequisite rule");
                 return;
             }
 
-            Prerequisites prerequisites = project.getPrerequisites();
+            Prerequisites prerequisites = project.getModel().getPrerequisites();
 
             if (prerequisites == null) {
                 StringBuilder buf = new StringBuilder();
@@ -101,17 +108,15 @@ public final class RequirePrerequisite extends AbstractStandardEnforcerRule {
 
             if (mavenVersion != null) {
 
-                VersionRange requiredVersionRange = VersionRange.createFromVersionSpec(mavenVersion);
+                VersionConstraint requiredVersionRange = versionParser.parseVersionConstraint(mavenVersion);
 
-                if (!requiredVersionRange.hasRestrictions()) {
-                    requiredVersionRange = VersionRange.createFromVersionSpec("[" + mavenVersion + ",)");
+                if (requiredVersionRange.getVersionRange() == null) {
+                    requiredVersionRange = versionParser.parseVersionConstraint("[" + mavenVersion + ",)");
                 }
 
-                VersionRange specifiedVersion = VersionRange.createFromVersionSpec(prerequisites.getMaven());
+                VersionConstraint specifiedVersion = versionParser.parseVersionConstraint(prerequisites.getMaven());
 
-                VersionRange restrictedVersionRange = requiredVersionRange.restrict(specifiedVersion);
-
-                if (restrictedVersionRange.getRecommendedVersion() == null) {
+                if (!isSatisfied(requiredVersionRange, specifiedVersion)) {
                     StringBuilder buf = new StringBuilder();
                     if (getMessage() != null) {
                         buf.append(getMessage()).append("\n");
@@ -121,9 +126,30 @@ public final class RequirePrerequisite extends AbstractStandardEnforcerRule {
                     throw new EnforcerRuleException(buf.toString());
                 }
             }
-        } catch (InvalidVersionSpecificationException e) {
+        } catch (VersionParserException e) {
             throw new EnforcerRuleException(e.getMessage(), e);
         }
+    }
+
+    /**
+     * A single version is satisfied if it is inside the required range, a range is compared by its inclusive
+     * boundaries.
+     */
+    private static boolean isSatisfied(VersionConstraint required, VersionConstraint specified) {
+        if (specified.getRecommendedVersion() != null) {
+            return required.contains(specified.getRecommendedVersion());
+        }
+        VersionRange range = specified.getVersionRange();
+        for (VersionRange.Boundary boundary :
+                new VersionRange.Boundary[] {range.getLowerBoundary(), range.getUpperBoundary()}) {
+            if (boundary != null && boundary.isInclusive()) {
+                Version version = boundary.getVersion();
+                if (required.contains(version)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     @Override

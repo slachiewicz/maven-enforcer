@@ -18,7 +18,7 @@
  */
 package org.apache.maven.enforcer.rules.property;
 
-import javax.inject.Named;
+import org.apache.maven.api.di.Named;
 
 /**
  * This rule checks that certain environment variable is set.

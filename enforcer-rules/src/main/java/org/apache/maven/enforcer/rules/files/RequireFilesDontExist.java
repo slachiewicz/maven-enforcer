@@ -18,9 +18,9 @@
  */
 package org.apache.maven.enforcer.rules.files;
 
-import javax.inject.Named;
-
 import java.io.File;
+
+import org.apache.maven.api.di.Named;
 
 /**
  * The Class RequireFilesDontExist.

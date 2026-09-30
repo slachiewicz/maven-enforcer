@@ -25,12 +25,12 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.maven.artifact.Artifact;
-import org.apache.maven.artifact.versioning.ArtifactVersion;
-import org.apache.maven.artifact.versioning.DefaultArtifactVersion;
-import org.apache.maven.artifact.versioning.InvalidVersionSpecificationException;
-import org.apache.maven.artifact.versioning.VersionRange;
-import org.apache.maven.model.Dependency;
+import org.apache.maven.api.Artifact;
+import org.apache.maven.api.Dependency;
+import org.apache.maven.api.Version;
+import org.apache.maven.api.VersionConstraint;
+import org.apache.maven.api.services.VersionParser;
+import org.apache.maven.api.services.VersionParserException;
 
 import static java.util.Optional.ofNullable;
 
@@ -45,15 +45,18 @@ public final class ArtifactMatcher {
      * @author I don't know
      */
     public static class Pattern {
+        private final VersionParser versionParser;
+
         private final String pattern;
 
         private final String[] parts;
         private final Predicate<String>[] partsRegex;
 
-        public Pattern(String pattern) {
+        public Pattern(VersionParser versionParser, String pattern) {
             if (pattern == null) {
                 throw new NullPointerException("pattern");
             }
+            this.versionParser = Objects.requireNonNull(versionParser, "versionParser");
 
             this.pattern = pattern;
 
@@ -74,14 +77,17 @@ public final class ArtifactMatcher {
         public boolean match(Artifact artifact) {
             Objects.requireNonNull(artifact, "artifact must not be null");
             try {
+                if (artifact instanceof Dependency) {
+                    return match((Dependency) artifact);
+                }
                 return match(
                         artifact.getGroupId(),
                         artifact.getArtifactId(),
-                        artifact.getVersion(),
-                        artifact.getType(),
-                        artifact.getScope(),
+                        artifact.getVersion().toString(),
+                        artifact.getExtension(),
+                        null,
                         artifact.getClassifier());
-            } catch (InvalidVersionSpecificationException e) {
+            } catch (VersionParserException e) {
                 throw new IllegalArgumentException(e);
             }
         }
@@ -92,18 +98,42 @@ public final class ArtifactMatcher {
                 return match(
                         dependency.getGroupId(),
                         dependency.getArtifactId(),
-                        dependency.getVersion(),
-                        dependency.getType(),
-                        dependency.getScope(),
+                        dependency.getVersion().toString(),
+                        dependency.getType().id(),
+                        dependency.getScope().id(),
                         dependency.getClassifier());
-            } catch (InvalidVersionSpecificationException e) {
+            } catch (VersionParserException e) {
                 throw new IllegalArgumentException(e);
             }
         }
 
-        private boolean match(
-                String groupId, String artifactId, String version, String type, String scope, String classifier)
-                throws InvalidVersionSpecificationException {
+        public boolean match(org.apache.maven.api.model.Dependency dependency) {
+            Objects.requireNonNull(dependency, "dependency must not be null");
+            try {
+                return match(
+                        dependency.getGroupId(),
+                        dependency.getArtifactId(),
+                        dependency.getVersion(),
+                        dependency.getType(),
+                        dependency.getScope(),
+                        dependency.getClassifier());
+            } catch (VersionParserException e) {
+                throw new IllegalArgumentException(e);
+            }
+        }
+
+        public boolean match(org.apache.maven.api.model.Plugin plugin) {
+            Objects.requireNonNull(plugin, "plugin must not be null");
+            try {
+                return match(
+                        plugin.getGroupId(), plugin.getArtifactId(), plugin.getVersion(), "maven-plugin", null, null);
+            } catch (VersionParserException e) {
+                throw new IllegalArgumentException(e);
+            }
+        }
+
+        public boolean match(
+                String groupId, String artifactId, String version, String type, String scope, String classifier) {
             switch (parts.length) {
                 case 6:
                     if (!matches(5, classifier)) {
@@ -111,7 +141,7 @@ public final class ArtifactMatcher {
                     }
                 case 5:
                     if (scope == null || scope.isEmpty()) {
-                        scope = Artifact.SCOPE_COMPILE;
+                        scope = "compile";
                     }
 
                     if (!matches(4, scope)) {
@@ -129,7 +159,7 @@ public final class ArtifactMatcher {
                 case 3:
                     if (!matches(2, version)) {
                         if (!containsVersion(
-                                VersionRange.createFromVersionSpec(parts[2]), new DefaultArtifactVersion(version))) {
+                                versionParser.parseVersionConstraint(parts[2]), versionParser.parseVersion(version))) {
                             return false;
                         }
                     }
@@ -188,16 +218,19 @@ public final class ArtifactMatcher {
      * @param includeStrings excludes
      * @throws NullPointerException if any of the arguments is null
      */
-    public ArtifactMatcher(final Collection<String> excludeStrings, final Collection<String> includeStrings) {
+    public ArtifactMatcher(
+            final VersionParser versionParser,
+            final Collection<String> excludeStrings,
+            final Collection<String> includeStrings) {
         ofNullable(excludeStrings)
                 .ifPresent(excludes -> excludes.stream()
                         .filter(StringUtils::isNotEmpty)
-                        .map(Pattern::new)
+                        .map(p -> new Pattern(versionParser, p))
                         .forEach(excludePatterns::add));
         ofNullable(includeStrings)
                 .ifPresent(includes -> includes.stream()
                         .filter(StringUtils::isNotEmpty)
-                        .map(Pattern::new)
+                        .map(p -> new Pattern(versionParser, p))
                         .forEach(includePatterns::add));
     }
 
@@ -228,6 +261,10 @@ public final class ArtifactMatcher {
         return match(p -> p.match(dependency));
     }
 
+    public boolean match(org.apache.maven.api.model.Dependency dependency) {
+        return match(p -> p.match(dependency));
+    }
+
     /**
      * Copied from Artifact.VersionRange. This is tweaked to handle singular ranges properly. The default
      * containsVersion method assumes a singular version means allow everything.
@@ -237,24 +274,24 @@ public final class ArtifactMatcher {
      * @param version the version to be checked
      * @return true if the version is contained by the range
      */
-    public static boolean containsVersion(VersionRange allowedRange, ArtifactVersion version) {
-        ArtifactVersion recommendedVersion = allowedRange.getRecommendedVersion();
-        if (recommendedVersion == null) {
-            return allowedRange.containsVersion(version);
-        } else {
-            // only singular versions ever have a recommendedVersion
-            int compareTo = recommendedVersion.compareTo(version);
-            return compareTo <= 0;
+    public static boolean containsVersion(VersionConstraint allowedRange, Version version) {
+        if (allowedRange.getVersionRange() != null) {
+            return allowedRange.getVersionRange().contains(version);
         }
+        // only singular versions have a recommended version, which is used as the lower bound
+        return allowedRange.getRecommendedVersion().compareTo(version) <= 0;
     }
 
-    /**
-     * To be used for artifacts which are equivalent for the purposes of the {@link ArtifactMatcher}.
-     */
     public static class MatchingArtifact {
         String artifactString;
 
         public MatchingArtifact(Artifact artifact) {
+            String type = artifact instanceof Dependency
+                    ? ((Dependency) artifact).getType().id()
+                    : artifact.getExtension();
+            String scope = artifact instanceof Dependency
+                    ? ((Dependency) artifact).getScope().id()
+                    : null;
             artifactString = new StringBuilder()
                     .append(artifact.getGroupId())
                     .append(":")
@@ -262,9 +299,9 @@ public final class ArtifactMatcher {
                     .append(":")
                     .append(artifact.getVersion())
                     .append(":")
-                    .append(artifact.getType())
+                    .append(type)
                     .append(":")
-                    .append(artifact.getScope())
+                    .append(scope)
                     .append(":")
                     .append(artifact.getClassifier())
                     .toString();

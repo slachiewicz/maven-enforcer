@@ -23,10 +23,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
-import org.apache.maven.model.InputLocation;
-import org.apache.maven.model.InputLocationTracker;
-import org.apache.maven.model.Plugin;
-import org.apache.maven.model.ReportPlugin;
+import org.apache.maven.api.model.InputLocation;
+import org.apache.maven.api.model.InputLocationTracker;
+import org.apache.maven.api.model.Plugin;
+import org.apache.maven.api.model.ReportPlugin;
 
 /**
  * @author Brian Fox

@@ -18,14 +18,13 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.project.MavenProject;
 
 /**
  * This rule checks that the Maven coordinates (i.e. the project's {@code groupId} and {@code artifactId}) each match a given pattern.
@@ -40,10 +39,10 @@ public final class RequireMatchingCoordinates extends AbstractStandardEnforcerRu
 
     private boolean moduleNameMustMatchArtifactId;
 
-    private final MavenProject project;
+    private final Project project;
 
     @Inject
-    public RequireMatchingCoordinates(MavenProject project) {
+    public RequireMatchingCoordinates(Project project) {
         this.project = Objects.requireNonNull(project);
     }
 
@@ -77,13 +76,13 @@ public final class RequireMatchingCoordinates extends AbstractStandardEnforcerRu
             hasError = true;
         }
         if (moduleNameMustMatchArtifactId
-                && !project.isExecutionRoot()
-                && !project.getBasedir().getName().equals(project.getArtifactId())) {
+                && !project.isTopProject()
+                && !project.getBasedir().getFileName().toString().equals(project.getArtifactId())) {
             msgBuilder
                     .append("Module directory name must be equal to its artifact ID \"")
                     .append(project.getArtifactId())
                     .append("\" but is \"")
-                    .append(project.getBasedir().getName())
+                    .append(project.getBasedir().getFileName().toString())
                     .append("\"")
                     .append("\n");
             hasError = true;

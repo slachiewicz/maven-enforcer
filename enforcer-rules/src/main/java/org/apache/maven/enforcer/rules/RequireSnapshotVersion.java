@@ -18,15 +18,15 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.Objects;
-import java.util.Optional;
 
-import org.apache.maven.artifact.Artifact;
+import org.apache.maven.api.ProducedArtifact;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Parent;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.project.MavenProject;
 
 /**
  * This rule checks that the current project is not a release.
@@ -39,17 +39,20 @@ public final class RequireSnapshotVersion extends AbstractStandardEnforcerRule {
      */
     private boolean failWhenParentIsRelease = true;
 
-    private final MavenProject project;
+    private final Project project;
+
+    private final VersionParser versionParser;
 
     @Inject
-    public RequireSnapshotVersion(MavenProject project) {
+    public RequireSnapshotVersion(Project project, VersionParser versionParser) {
         this.project = Objects.requireNonNull(project);
+        this.versionParser = Objects.requireNonNull(versionParser);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
 
-        Artifact artifact = project.getArtifact();
+        ProducedArtifact artifact = project.getPomArtifact();
 
         if (!artifact.isSnapshot()) {
             String message = getMessage();
@@ -57,15 +60,14 @@ public final class RequireSnapshotVersion extends AbstractStandardEnforcerRule {
             if (message != null) {
                 sb.append(message).append(System.lineSeparator());
             }
-            sb.append("This project cannot be a release:").append(artifact.getId());
+            sb.append("This project cannot be a release:").append(project.getId());
             throw new EnforcerRuleException(sb.toString());
         }
-        if (failWhenParentIsRelease && project.hasParent()) {
-            Artifact parentArtifact = Optional.ofNullable(project.getParent())
-                    .map(MavenProject::getArtifact)
-                    .orElse(null);
-            if (parentArtifact != null && !parentArtifact.isSnapshot()) {
-                throw new EnforcerRuleException("Parent cannot be a release: " + parentArtifact.getId());
+        if (failWhenParentIsRelease) {
+            Parent parent = project.getModel().getParent();
+            if (parent != null && !versionParser.isSnapshot(parent.getVersion())) {
+                throw new EnforcerRuleException("Parent cannot be a release: " + parent.getGroupId() + ":"
+                        + parent.getArtifactId() + ":pom:" + parent.getVersion());
             }
         }
     }

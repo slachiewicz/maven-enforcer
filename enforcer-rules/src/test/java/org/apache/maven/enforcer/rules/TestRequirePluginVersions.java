@@ -21,24 +21,21 @@ package org.apache.maven.enforcer.rules;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
-import org.apache.maven.artifact.factory.ArtifactFactory;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.model.Plugin;
+import org.apache.maven.api.services.LifecycleRegistry;
+import org.apache.maven.api.services.ProjectManager;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleError;
 import org.apache.maven.enforcer.rules.utils.EnforcerRuleUtils;
 import org.apache.maven.enforcer.rules.utils.ExpressionEvaluator;
 import org.apache.maven.enforcer.rules.utils.PluginWrapper;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.lifecycle.DefaultLifecycles;
-import org.apache.maven.model.Plugin;
-import org.apache.maven.plugin.MojoExecutionException;
-import org.apache.maven.plugin.PluginManager;
-import org.apache.maven.project.MavenProject;
-import org.apache.maven.rtinfo.RuntimeInformation;
-import org.codehaus.plexus.PlexusContainer;
-import org.eclipse.aether.RepositorySystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -65,34 +62,22 @@ import static org.mockito.Mockito.when;
 class TestRequirePluginVersions {
 
     @Mock
-    private PluginManager pluginManager;
+    private Session session;
 
     @Mock
-    private ArtifactFactory factory;
+    private ProjectManager projectManager;
 
     @Mock
-    private RepositorySystem repositorySystem;
-
-    @Mock
-    private MavenSession session;
+    private LifecycleRegistry lifecycleRegistry;
 
     @Mock
     private EnforcerRuleUtils utils;
 
     @Mock
-    private RuntimeInformation runtimeInformation;
-
-    @Mock
-    private DefaultLifecycles defaultLifeCycles;
-
-    @Mock
-    private MavenProject project;
+    private Project project;
 
     @Mock
     private ExpressionEvaluator evaluator;
-
-    @Mock
-    private PlexusContainer container;
 
     @InjectMocks
     private RequirePluginVersions rule;
@@ -111,9 +96,7 @@ class TestRequirePluginVersions {
         when(evaluator.evaluate(anyString())).thenAnswer(i -> i.getArgument(0));
         when(evaluator.evaluate(isNull())).thenReturn(null);
 
-        Plugin source = new Plugin();
-        source.setArtifactId("foo");
-        source.setGroupId("group");
+        Plugin source = Plugin.newBuilder().groupId("group").artifactId("foo").build();
 
         // set up the plugins. I'm setting up the foo group
         // with a few bogus entries and then a real one.
@@ -122,21 +105,21 @@ class TestRequirePluginVersions {
         // banLatest/Release will fail if it is found
         // anywhere in the list.
         List<Plugin> plugins = new ArrayList<>();
-        plugins.add(EnforcerTestUtils.newPlugin("group", "a-artifact", "1.0"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "foo", null));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "foo", ""));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "b-artifact", "1.0"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "foo", "1.0"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "c-artifact", "LATEST"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "c-artifact", "1.0"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "d-artifact", "RELEASE"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "d-artifact", "1.0"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "e-artifact", "1.0"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "e-artifact", "RELEASE"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "f-artifact", "1.0"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "f-artifact", "LATEST"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "f-artifact", "1.0-SNAPSHOT"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "g-artifact", "1.0-12345678.123456-1"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "a-artifact", "1.0"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "foo", null));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "foo", ""));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "b-artifact", "1.0"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "foo", "1.0"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "c-artifact", "LATEST"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "c-artifact", "1.0"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "d-artifact", "RELEASE"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "d-artifact", "1.0"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "e-artifact", "1.0"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "e-artifact", "RELEASE"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "f-artifact", "1.0"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "f-artifact", "LATEST"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "f-artifact", "1.0-SNAPSHOT"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "g-artifact", "1.0-12345678.123456-1"));
 
         List<PluginWrapper> pluginWrappers = PluginWrapper.addAll(plugins, false);
 
@@ -147,7 +130,7 @@ class TestRequirePluginVersions {
         assertTrue(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         // check that LATEST is allowed
-        source.setArtifactId("c-artifact");
+        source = source.withArtifactId("c-artifact");
         assertTrue(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         // check that LATEST is banned
@@ -156,7 +139,7 @@ class TestRequirePluginVersions {
 
         // check that LATEST is exhaustively checked
         rule.setBanSnapshots(false);
-        source.setArtifactId("f-artifact");
+        source = source.withArtifactId("f-artifact");
         assertFalse(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         rule.setBanLatest(false);
@@ -165,11 +148,11 @@ class TestRequirePluginVersions {
 
         // check that TIMESTAMP is allowed
         rule.setBanTimestamps(false);
-        source.setArtifactId("g-artifact");
+        source = source.withArtifactId("g-artifact");
         assertTrue(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         // check that RELEASE is allowed
-        source.setArtifactId("d-artifact");
+        source = source.withArtifactId("d-artifact");
         assertTrue(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         // check that RELEASE is banned
@@ -177,7 +160,7 @@ class TestRequirePluginVersions {
         assertFalse(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         // check that RELEASE is exhaustively checked
-        source.setArtifactId("e-artifact");
+        source = source.withArtifactId("e-artifact");
         assertFalse(rule.hasValidVersionSpecified(source, pluginWrappers));
     }
 
@@ -189,17 +172,16 @@ class TestRequirePluginVersions {
 
         when(evaluator.evaluate(anyString())).thenAnswer(i -> ((String) i.getArgument(0)).replaceAll("\\$\\{|}", ""));
 
-        Plugin source = new Plugin();
-        source.setGroupId("group");
+        Plugin source = Plugin.newBuilder().groupId("group").build();
 
         // set up the plugins.
         List<Plugin> plugins = new ArrayList<>();
-        plugins.add(EnforcerTestUtils.newPlugin("group", "a-artifact", "1.0-${SNAPSHOT}"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "b-artifact", "${1.0}"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "c-artifact", "${LATEST}"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "d-artifact", "${RELEASE}"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "e-artifact", "${}"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "f-artifact", "${   }"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "a-artifact", "1.0-${SNAPSHOT}"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "b-artifact", "${1.0}"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "c-artifact", "${LATEST}"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "d-artifact", "${RELEASE}"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "e-artifact", "${}"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "f-artifact", "${   }"));
 
         List<PluginWrapper> pluginWrappers = PluginWrapper.addAll(plugins, false);
 
@@ -207,47 +189,46 @@ class TestRequirePluginVersions {
         rule.setBanRelease(false);
         rule.setBanSnapshots(false);
 
-        source.setArtifactId("a-artifact");
+        source = source.withArtifactId("a-artifact");
         assertTrue(rule.hasValidVersionSpecified(source, pluginWrappers));
 
-        source.setArtifactId("b-artifact");
+        source = source.withArtifactId("b-artifact");
         assertTrue(rule.hasValidVersionSpecified(source, pluginWrappers));
 
-        source.setArtifactId("c-artifact");
+        source = source.withArtifactId("c-artifact");
         assertTrue(rule.hasValidVersionSpecified(source, pluginWrappers));
 
-        source.setArtifactId("d-artifact");
+        source = source.withArtifactId("d-artifact");
         assertTrue(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         // this one checks empty property values
-        source.setArtifactId("e-artifact");
+        source = source.withArtifactId("e-artifact");
         assertFalse(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         // this one checks empty property values
-        source.setArtifactId("f-artifact");
+        source = source.withArtifactId("f-artifact");
         assertFalse(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         rule.setBanLatest(true);
-        source.setArtifactId("c-artifact");
+        source = source.withArtifactId("c-artifact");
         assertFalse(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         rule.setBanRelease(true);
-        source.setArtifactId("d-artifact");
+        source = source.withArtifactId("d-artifact");
         assertFalse(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         rule.setBanSnapshots(true);
-        source.setArtifactId("a-artifact");
+        source = source.withArtifactId("a-artifact");
         assertFalse(rule.hasValidVersionSpecified(source, pluginWrappers));
 
         // release versions should pass everything
-        source.setArtifactId("b-artifact");
+        source = source.withArtifactId("b-artifact");
         assertTrue(rule.hasValidVersionSpecified(source, pluginWrappers));
     }
 
     /**
      * Test get additional plugins null.
      *
-     * @throws MojoExecutionException the mojo execution exception
      */
     @Test
     void testGetAdditionalPluginsNull() throws Exception {
@@ -265,7 +246,7 @@ class TestRequirePluginVersions {
         // invalid format (not enough sections)
         additional.add("group");
 
-        Set<Plugin> plugins = new HashSet<>();
+        Map<String, Plugin> plugins = new LinkedHashMap<>();
         try {
             rule.addAdditionalPlugins(plugins, additional);
             fail("Expected Exception because the format is invalid");
@@ -285,7 +266,6 @@ class TestRequirePluginVersions {
     /**
      * Test get additional plugins empty set.
      *
-     * @throws MojoExecutionException the mojo execution exception
      */
     @Test
     void testGetAdditionalPluginsEmptySet() throws Exception {
@@ -294,7 +274,7 @@ class TestRequirePluginVersions {
         additional.add("group:another-artifact");
 
         // make sure a null set can be handled
-        Set<Plugin> results = rule.addAdditionalPlugins(null, additional);
+        Map<String, Plugin> results = rule.addAdditionalPlugins(null, additional);
 
         assertNotNull(results);
         assertContainsPlugin("group", "a-artifact", results);
@@ -304,21 +284,20 @@ class TestRequirePluginVersions {
     /**
      * Test get additional plugins.
      *
-     * @throws MojoExecutionException the mojo execution exception
      */
     @Test
     void testGetAdditionalPlugins() throws Exception {
 
-        Set<Plugin> plugins = new HashSet<>();
-        plugins.add(EnforcerTestUtils.newPlugin("group", "a-artifact", "1.0"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "foo", null));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "foo2", ""));
+        Map<String, Plugin> plugins = new LinkedHashMap<>();
+        add(plugins, EnforcerTestUtils.newPlugin("group", "a-artifact", "1.0"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "foo", null));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "foo2", ""));
 
         List<String> additional = new ArrayList<>();
         additional.add("group:a-artifact");
         additional.add("group:another-artifact");
 
-        Set<Plugin> results = rule.addAdditionalPlugins(plugins, additional);
+        Map<String, Plugin> results = rule.addAdditionalPlugins(plugins, additional);
 
         // make sure only one new plugin has been added
         assertNotNull(results);
@@ -330,21 +309,20 @@ class TestRequirePluginVersions {
     /**
      * Test remove Unchecked plugins.
      *
-     * @throws MojoExecutionException the mojo execution exception
      */
     @Test
     void testGetUncheckedPlugins() throws Exception {
 
-        Set<Plugin> plugins = new HashSet<>();
-        plugins.add(EnforcerTestUtils.newPlugin("group", "a-artifact", "1.0"));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "foo", null));
-        plugins.add(EnforcerTestUtils.newPlugin("group", "foo2", ""));
+        Map<String, Plugin> plugins = new LinkedHashMap<>();
+        add(plugins, EnforcerTestUtils.newPlugin("group", "a-artifact", "1.0"));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "foo", null));
+        add(plugins, EnforcerTestUtils.newPlugin("group", "foo2", ""));
 
         List<String> unchecked = new ArrayList<>();
         // intentionally inserting spaces to make sure they are handled correctly.
         unchecked.add("group : a-artifact");
 
-        Collection<Plugin> results = rule.removeUncheckedPlugins(unchecked, plugins);
+        Map<String, Plugin> results = rule.removeUncheckedPlugins(unchecked, plugins);
 
         // make sure only one new plugin has been added
         assertNotNull(results);
@@ -473,11 +451,8 @@ class TestRequirePluginVersions {
      * @param artifact the artifact
      * @param plugins   the set
      */
-    private void assertContainsPlugin(String group, String artifact, Collection<Plugin> plugins) {
-        Plugin plugin = new Plugin();
-        plugin.setGroupId(group);
-        plugin.setArtifactId(artifact);
-        assertTrue(plugins.contains(plugin));
+    private void assertContainsPlugin(String group, String artifact, Map<String, Plugin> plugins) {
+        assertTrue(plugins.containsKey(group + ":" + artifact));
     }
 
     /**
@@ -487,11 +462,16 @@ class TestRequirePluginVersions {
      * @param artifact the artifact
      * @param plugins   the set
      */
-    private void assertNotContainPlugin(String group, String artifact, Collection<Plugin> plugins) {
-        Plugin plugin = new Plugin();
-        plugin.setGroupId(group);
-        plugin.setArtifactId(artifact);
-        assertFalse(plugins.contains(plugin));
+    private void assertNotContainPlugin(String group, String artifact, Map<String, Plugin> plugins) {
+        assertFalse(plugins.containsKey(group + ":" + artifact));
+    }
+
+    private static void add(Map<String, Plugin> plugins, Plugin plugin) {
+        plugins.put(plugin.getKey(), plugin);
+    }
+
+    private static void add(List<Plugin> plugins, Plugin plugin) {
+        plugins.add(plugin);
     }
 
     /**

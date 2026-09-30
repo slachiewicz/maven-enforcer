@@ -18,8 +18,6 @@
  */
 package org.apache.maven.enforcer.rules.version;
 
-import javax.inject.Named;
-
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
@@ -28,10 +26,12 @@ import java.util.regex.Pattern;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.SystemUtils;
-import org.apache.maven.artifact.versioning.ArtifactVersion;
-import org.apache.maven.artifact.versioning.DefaultArtifactVersion;
-import org.apache.maven.artifact.versioning.InvalidVersionSpecificationException;
-import org.apache.maven.artifact.versioning.VersionRange;
+import org.apache.maven.api.Version;
+import org.apache.maven.api.VersionConstraint;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.services.VersionParser;
+import org.apache.maven.api.services.VersionParserException;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 
 /**
@@ -48,6 +48,11 @@ public final class RequireJavaVersion extends AbstractVersionEnforcer {
      * Display the normalized JDK version.
      */
     private boolean display = false;
+
+    @Inject
+    public RequireJavaVersion(VersionParser versionParser) {
+        super(versionParser);
+    }
 
     @Override
     public void setVersion(String version) {
@@ -89,17 +94,12 @@ public final class RequireJavaVersion extends AbstractVersionEnforcer {
             getLog().debug("Normalized Java Version: '" + javaVersionNormalized + "'");
         }
 
-        ArtifactVersion detectedJdkVersion = new DefaultArtifactVersion(javaVersionNormalized);
-
-        getLog().debug("Parsed Version: Major: " + detectedJdkVersion.getMajorVersion() + " Minor: "
-                + detectedJdkVersion.getMinorVersion() + " Incremental: " + detectedJdkVersion.getIncrementalVersion()
-                + " Build: " + detectedJdkVersion.getBuildNumber() + " Qualifier: "
-                + detectedJdkVersion.getQualifier());
+        Version detectedJdkVersion = getVersionParser().parseVersion(javaVersionNormalized);
 
         setCustomMessageIfNoneConfigured(detectedJdkVersion, getVersion());
 
         try {
-            enforceVersion("JDK", getVersion(), new DefaultArtifactVersion(javaVersion));
+            enforceVersion("JDK", getVersion(), getVersionParser().parseVersion(javaVersion));
         } catch (EnforcerRuleException ex) {
             enforceVersion("JDK", getVersion(), detectedJdkVersion);
         }
@@ -114,7 +114,7 @@ public final class RequireJavaVersion extends AbstractVersionEnforcer {
     public static String normalizeJDKVersion(String jdkVersion) {
 
         jdkVersion = jdkVersion.replaceAll("_|-", ".");
-        String tokenArray[] = StringUtils.split(jdkVersion, ".");
+        String[] tokenArray = StringUtils.split(jdkVersion, ".");
         List<String> tokens = Arrays.asList(tokenArray);
         StringBuilder buffer = new StringBuilder(jdkVersion.length());
 
@@ -139,13 +139,13 @@ public final class RequireJavaVersion extends AbstractVersionEnforcer {
         return StringUtils.stripEnd(version, ".");
     }
 
-    private void setCustomMessageIfNoneConfigured(ArtifactVersion detectedJdkVersion, String allowedVersionRange) {
+    private void setCustomMessageIfNoneConfigured(Version detectedJdkVersion, String allowedVersionRange) {
         if (getMessage() == null) {
             String version;
             try {
-                VersionRange vr = VersionRange.createFromVersionSpec(allowedVersionRange);
+                VersionConstraint vr = getVersionParser().parseVersionConstraint(allowedVersionRange);
                 version = AbstractVersionEnforcer.toString(vr);
-            } catch (InvalidVersionSpecificationException e) {
+            } catch (VersionParserException e) {
                 getLog().debug("Could not parse allowed version range " + allowedVersionRange + " " + e.getMessage());
                 version = allowedVersionRange;
             }

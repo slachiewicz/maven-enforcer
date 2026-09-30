@@ -20,48 +20,33 @@ package org.apache.maven.enforcer.rules;
 
 import java.util.Collections;
 
+import org.apache.maven.api.model.Dependency;
+import org.apache.maven.api.model.Model;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.model.Dependency;
-import org.apache.maven.model.Model;
-import org.apache.maven.project.MavenProject;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
 class TestRequireExplicitDependencyScope {
-
-    @Mock
-    private MavenProject project;
-
-    private RequireExplicitDependencyScope rule;
-
-    @BeforeEach
-    void setUp() {
-        rule = new RequireExplicitDependencyScope(project);
-        rule.setLog(mock(EnforcerLogger.class));
-    }
 
     @Test
     void shouldOutputCustomMessageWhenScopeMissing() {
+        // scope is intentionally null
+        Dependency dep = Dependency.newBuilder()
+                .groupId("com.example")
+                .artifactId("no-scope-dep")
+                .build();
+
+        Model model =
+                Model.newBuilder().dependencies(Collections.singletonList(dep)).build();
+        RequireExplicitDependencyScope rule = new RequireExplicitDependencyScope(
+                EnforcerTestUtils.mockProject(), EnforcerTestUtils.modelXmlFactory(model));
+        rule.setLog(mock(EnforcerLogger.class));
+
         String customMessage = "Custom explicit scope message";
         rule.setMessage(customMessage);
-
-        Dependency dep = new Dependency();
-        dep.setGroupId("com.example");
-        dep.setArtifactId("no-scope-dep");
-        // scope is intentionally null
-
-        Model model = mock(Model.class);
-        when(model.getDependencies()).thenReturn(Collections.singletonList(dep));
-        when(project.getOriginalModel()).thenReturn(model);
 
         assertThatThrownBy(() -> rule.execute())
                 .isInstanceOf(EnforcerRuleException.class)

@@ -18,18 +18,20 @@
  */
 package org.apache.maven.enforcer.rules.dependency;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 
+import org.apache.maven.api.ProducedArtifact;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.model.Parent;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
+import org.apache.maven.enforcer.rules.EnforcerTestUtils;
 import org.apache.maven.enforcer.rules.utils.DependencyNodeBuilder;
 import org.apache.maven.enforcer.rules.utils.EnforcerArtifactStubFactory;
-import org.apache.maven.execution.MavenSession;
-import org.apache.maven.project.MavenProject;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -40,6 +42,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -53,26 +57,38 @@ class RequireReleaseDepsTest {
     private static final EnforcerArtifactStubFactory ARTIFACT_STUB_FACTORY = new EnforcerArtifactStubFactory();
 
     @Mock
-    private MavenProject project;
-
-    @Mock
-    private MavenSession session;
+    private Project project;
 
     @Mock
     private ResolverUtil resolverUtil;
 
-    @InjectMocks
     private RequireReleaseDeps rule;
 
+    @BeforeEach
+    void setUp() {
+        rule = new RequireReleaseDeps(project, resolverUtil, EnforcerTestUtils.getVersionParser());
+        // a project without a parent, unless the test says otherwise
+        lenient().when(project.getModel()).thenReturn(Model.newInstance());
+    }
+
+    private static Model modelWithSnapshotParent() {
+        return Model.newBuilder()
+                .parent(Parent.newBuilder()
+                        .groupId("testGroupId")
+                        .artifactId("snapshot")
+                        .version("2.0-SNAPSHOT")
+                        .build())
+                .build();
+    }
+
     @Test
-    void testSearchNonTransitive() throws IOException {
-        when(session.getCurrentProject()).thenReturn(project);
-        when(project.getDependencyArtifacts()).thenReturn(ARTIFACT_STUB_FACTORY.getScopedArtifacts());
+    void testSearchNonTransitive() throws Exception {
+        // the direct dependencies are the children of the root node
+        when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
+                .thenReturn(DependencyNodeBuilder.rootOf(ARTIFACT_STUB_FACTORY.getScopedArtifacts()));
         rule.setSearchTransitive(false);
 
         assertThatCode(rule::execute).doesNotThrowAnyException();
-
-        verifyNoInteractions(resolverUtil);
     }
 
     @Test
@@ -91,7 +107,6 @@ class RequireReleaseDepsTest {
 
     @Test
     void testSearchTransitiveNoFailures() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(new DependencyNodeBuilder().build());
 
@@ -101,8 +116,9 @@ class RequireReleaseDepsTest {
 
     @Test
     void testShouldFailOnlyWhenRelease() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
-        when(project.getArtifact()).thenReturn(ARTIFACT_STUB_FACTORY.getSnapshotArtifact());
+        ProducedArtifact artifact = mock(ProducedArtifact.class);
+        when(project.getPomArtifact()).thenReturn(artifact);
+        when(artifact.isSnapshot()).thenReturn(true);
         rule.setOnlyWhenRelease(true);
 
         assertThatCode(rule::execute).doesNotThrowAnyException();
@@ -112,7 +128,6 @@ class RequireReleaseDepsTest {
 
     @Test
     void testWildcardExcludeTests() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(getDependencyNodeWithMultipleTestSnapshots());
 
@@ -124,7 +139,6 @@ class RequireReleaseDepsTest {
 
     @Test
     void testWildcardExcludeAll() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(getDependencyNodeWithMultipleTestSnapshots());
 
@@ -153,7 +167,6 @@ class RequireReleaseDepsTest {
 
     @Test
     void snapshotsExcludedByCoordinatesShouldPass() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(getDependencyNodeWithMultipleSnapshots());
 
@@ -182,7 +195,6 @@ class RequireReleaseDepsTest {
 
     @Test
     void includesWithoutAnyDependencyShouldPass() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(new DependencyNodeBuilder().build());
 
@@ -202,8 +214,7 @@ class RequireReleaseDepsTest {
 
     @Test
     void testFailWhenParentIsSnapshot() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
-        when(project.getParentArtifact()).thenReturn(ARTIFACT_STUB_FACTORY.getSnapshotArtifact());
+        when(project.getModel()).thenReturn(modelWithSnapshotParent());
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(new DependencyNodeBuilder().build());
 
@@ -211,13 +222,12 @@ class RequireReleaseDepsTest {
 
         assertThatCode(rule::execute)
                 .isInstanceOf(EnforcerRuleException.class)
-                .hasMessageContaining("Parent Cannot be a snapshot: testGroupId:snapshot:jar:2.0-SNAPSHOT");
+                .hasMessageContaining("Parent Cannot be a snapshot: testGroupId:snapshot:pom:2.0-SNAPSHOT");
     }
 
     @Test
     void parentShouldBeExcluded() throws Exception {
-        when(session.getCurrentProject()).thenReturn(project);
-        when(project.getParentArtifact()).thenReturn(ARTIFACT_STUB_FACTORY.getSnapshotArtifact());
+        when(project.getModel()).thenReturn(modelWithSnapshotParent());
         when(resolverUtil.resolveTransitiveDependencies(anyBoolean(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(new DependencyNodeBuilder().build());
 

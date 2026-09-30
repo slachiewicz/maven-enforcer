@@ -18,15 +18,14 @@
  */
 package org.apache.maven.enforcer.rules.dependency;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.function.Predicate;
 
-import org.apache.maven.artifact.Artifact;
+import org.apache.maven.api.Artifact;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.ArtifactUtils;
-import org.apache.maven.execution.MavenSession;
 
 /**
  * This rule checks that lists of dependencies are not included.
@@ -40,14 +39,14 @@ public final class BannedDependencies extends BannedDependenciesBase {
     private Predicate<Artifact> shouldInclude;
 
     @Inject
-    BannedDependencies(MavenSession session, ResolverUtil resolverUtil) {
-        super(session, resolverUtil);
+    BannedDependencies(ResolverUtil resolverUtil, VersionParser versionParser) {
+        super(resolverUtil, versionParser);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
-        shouldExclude = ArtifactUtils.prepareDependencyArtifactMatcher(getExcludes());
-        shouldInclude = ArtifactUtils.prepareDependencyArtifactMatcher(getIncludes());
+        shouldExclude = ArtifactUtils.prepareDependencyArtifactMatcher(getVersionParser(), getExcludes());
+        shouldInclude = ArtifactUtils.prepareDependencyArtifactMatcher(getVersionParser(), getIncludes());
         super.execute();
     }
 

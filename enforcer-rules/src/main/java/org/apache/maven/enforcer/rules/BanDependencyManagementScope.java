@@ -18,19 +18,21 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Dependency;
+import org.apache.maven.api.model.DependencyManagement;
+import org.apache.maven.api.services.VersionParser;
+import org.apache.maven.api.services.xml.ModelXmlFactory;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.utils.ArtifactMatcher;
-import org.apache.maven.model.Dependency;
-import org.apache.maven.model.DependencyManagement;
-import org.apache.maven.project.MavenProject;
+import org.apache.maven.enforcer.rules.utils.OriginalModels;
 
 /**
  * This rule bans all scope values except for {@code import} from dependencies within the dependency management.
@@ -55,11 +57,17 @@ public final class BanDependencyManagementScope extends AbstractStandardEnforcer
      */
     private boolean checkEffectivePom = false;
 
-    private final MavenProject project;
+    private final Project project;
+
+    private final ModelXmlFactory modelXmlFactory;
+
+    private final VersionParser versionParser;
 
     @Inject
-    public BanDependencyManagementScope(MavenProject project) {
+    public BanDependencyManagementScope(Project project, ModelXmlFactory modelXmlFactory, VersionParser versionParser) {
         this.project = Objects.requireNonNull(project);
+        this.modelXmlFactory = Objects.requireNonNull(modelXmlFactory);
+        this.versionParser = Objects.requireNonNull(versionParser);
     }
 
     @Override
@@ -67,7 +75,7 @@ public final class BanDependencyManagementScope extends AbstractStandardEnforcer
         // only evaluate local depMgmt, without taking into account inheritance and interpolation
         DependencyManagement depMgmt = checkEffectivePom
                 ? project.getModel().getDependencyManagement()
-                : project.getOriginalModel().getDependencyManagement();
+                : OriginalModels.read(modelXmlFactory, project).getDependencyManagement();
         if (depMgmt != null && depMgmt.getDependencies() != null) {
             List<Dependency> violatingDependencies = getViolatingDependencies(depMgmt);
             if (!violatingDependencies.isEmpty()) {
@@ -88,7 +96,7 @@ public final class BanDependencyManagementScope extends AbstractStandardEnforcer
     List<Dependency> getViolatingDependencies(DependencyManagement depMgmt) {
         final ArtifactMatcher excludesMatcher;
         if (excludes != null) {
-            excludesMatcher = new ArtifactMatcher(excludes, Collections.emptyList());
+            excludesMatcher = new ArtifactMatcher(versionParser, excludes, Collections.emptyList());
         } else {
             excludesMatcher = null;
         }
@@ -106,7 +114,7 @@ public final class BanDependencyManagementScope extends AbstractStandardEnforcer
         return violatingDependencies;
     }
 
-    private static CharSequence getErrorMessage(MavenProject project, Dependency violatingDependency) {
+    private static CharSequence getErrorMessage(Project project, Dependency violatingDependency) {
         return "Banned scope '" + violatingDependency.getScope() + "' used on dependency '"
                 + violatingDependency.getManagementKey() + "' @ "
                 + formatLocation(project, violatingDependency.getLocation(""))

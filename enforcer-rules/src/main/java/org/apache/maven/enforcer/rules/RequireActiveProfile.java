@@ -18,16 +18,15 @@
  */
 package org.apache.maven.enforcer.rules;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.model.Profile;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.project.MavenProject;
 
 /**
  * This rule checks that some profiles are active.
@@ -45,10 +44,10 @@ public final class RequireActiveProfile extends AbstractStandardEnforcerRule {
      */
     private boolean all = true;
 
-    private final MavenProject project;
+    private final Project project;
 
     @Inject
-    public RequireActiveProfile(MavenProject project) {
+    public RequireActiveProfile(Project project) {
         this.project = Objects.requireNonNull(project);
     }
 
@@ -109,10 +108,9 @@ public final class RequireActiveProfile extends AbstractStandardEnforcerRule {
      * @param profileId the profile name
      * @return <code>true</code> if profile is active, otherwise <code>false</code>
      */
-    private boolean isProfileActive(MavenProject project, String profileId) {
-        for (Map.Entry<String, List<String>> entry :
-                project.getInjectedProfileIds().entrySet()) {
-            if (entry.getValue().contains(profileId)) {
+    private boolean isProfileActive(Project project, String profileId) {
+        for (Profile profile : project.getEffectiveActiveProfiles()) {
+            if (profileId.equals(profile.getId())) {
                 return true;
             }
         }

@@ -18,12 +18,17 @@
  */
 package org.apache.maven.enforcer.rules.dependency;
 
+import java.lang.reflect.Field;
+import java.util.Collections;
+
+import org.apache.maven.api.Node;
 import org.apache.maven.enforcer.rule.api.EnforcerLogger;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
+import org.apache.maven.enforcer.rules.EnforcerTestUtils;
 import org.apache.maven.enforcer.rules.utils.DependencyNodeBuilder;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -38,25 +43,102 @@ class DependencyConvergenceTest {
     @Mock
     private ResolverUtil resolverUtil;
 
-    @InjectMocks
     private DependencyConvergence rule;
+
+    @BeforeEach
+    void setUp() {
+        rule = new DependencyConvergence(resolverUtil, EnforcerTestUtils.getVersionParser());
+        rule.setLog(mock(EnforcerLogger.class));
+    }
+
+    private void setField(String fieldName, Object value) throws ReflectiveOperationException {
+        Field field = DependencyConvergence.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(rule, value);
+    }
+
+    private static DependencyNodeBuilder node(String artifactId, String version) {
+        return new DependencyNodeBuilder().withArtifactId(artifactId).withVersion(version);
+    }
+
+    /**
+     * The root has a and b, both with a different version of c.
+     */
+    private static Node conflictingTree(String versionOfCInB) {
+        return new DependencyNodeBuilder()
+                .withChildNode(
+                        node("a", "1.0").withChildNode(node("c", "1.0").build()).build())
+                .withChildNode(node("b", "1.0")
+                        .withChildNode(node("c", versionOfCInB).build())
+                        .build())
+                .build();
+    }
+
+    @Test
+    void shouldPassWhenVersionsAreTheSame() throws Exception {
+        when(resolverUtil.resolveTransitiveDependenciesVerbose(anyList())).thenReturn(conflictingTree("1.0"));
+
+        assertThatCode(rule::execute).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldFailWithPathsWhenVersionsDiffer() throws Exception {
+        when(resolverUtil.resolveTransitiveDependenciesVerbose(anyList())).thenReturn(conflictingTree("2.0"));
+
+        assertThatCode(rule::execute)
+                .isInstanceOf(EnforcerRuleException.class)
+                .hasMessageContaining("Failed while enforcing releasability.")
+                .hasMessageContaining(
+                        "Dependency convergence error for default-group:c:jar:classifier:1.0. Paths to dependency are:")
+                .hasMessageContaining("+-default-group:default-artifact:jar:classifier:default-version:compile")
+                .hasMessageContaining("  +-default-group:a:jar:classifier:1.0:compile")
+                .hasMessageContaining("    +-default-group:c:jar:classifier:1.0:compile")
+                .hasMessageContaining("and")
+                .hasMessageContaining("  +-default-group:b:jar:classifier:1.0:compile")
+                .hasMessageContaining("    +-default-group:c:jar:classifier:2.0:compile");
+    }
+
+    @Test
+    void shouldIgnoreExcludedArtifact() throws Exception {
+        when(resolverUtil.resolveTransitiveDependenciesVerbose(anyList())).thenReturn(conflictingTree("2.0"));
+        setField("excludes", Collections.singletonList("default-group:c"));
+
+        assertThatCode(rule::execute).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldCheckOnlyIncludedArtifact() throws Exception {
+        when(resolverUtil.resolveTransitiveDependenciesVerbose(anyList())).thenReturn(conflictingTree("2.0"));
+        setField("includes", Collections.singletonList("default-group:a"));
+
+        assertThatCode(rule::execute).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldPassWhenSnapshotVersionsAreTheSame() throws Exception {
+        Node tree = new DependencyNodeBuilder()
+                .withChildNode(node("a", "1.0")
+                        .withChildNode(node("c", "1.0-SNAPSHOT").build())
+                        .build())
+                .withChildNode(node("b", "1.0")
+                        .withChildNode(node("c", "1.0-SNAPSHOT").build())
+                        .build())
+                .build();
+        when(resolverUtil.resolveTransitiveDependenciesVerbose(anyList())).thenReturn(tree);
+
+        assertThatCode(rule::execute).doesNotThrowAnyException();
+    }
 
     @Test
     void differentClassifiersWithDifferentVersionsDoNotConflict() throws Exception {
-        rule.setLog(mock(EnforcerLogger.class));
-
         when(resolverUtil.resolveTransitiveDependenciesVerbose(anyList()))
                 .thenReturn(new DependencyNodeBuilder()
-                        .withType(DependencyNodeBuilder.Type.POM)
-                        .withChildNode(new DependencyNodeBuilder()
-                                .withArtifactId("native-lib")
+                        .withType(DependencyNodeBuilder.NodeType.POM)
+                        .withChildNode(node("native-lib", "1.0.0")
                                 .withClassifier("linux-x86_64")
-                                .withVersion("1.0.0")
                                 .build())
-                        .withChildNode(new DependencyNodeBuilder()
-                                .withArtifactId("native-lib")
+                        .withChildNode(node("native-lib", "2.0.0")
                                 .withClassifier("osx-aarch_64")
-                                .withVersion("2.0.0")
                                 .build())
                         .build());
 
@@ -65,19 +147,11 @@ class DependencyConvergenceTest {
 
     @Test
     void sameClassifierWithDifferentVersionsStillConflicts() throws Exception {
-        rule.setLog(mock(EnforcerLogger.class));
-
         when(resolverUtil.resolveTransitiveDependenciesVerbose(anyList()))
                 .thenReturn(new DependencyNodeBuilder()
-                        .withType(DependencyNodeBuilder.Type.POM)
-                        .withChildNode(new DependencyNodeBuilder()
-                                .withArtifactId("childA")
-                                .withVersion("1.0.0")
-                                .build())
-                        .withChildNode(new DependencyNodeBuilder()
-                                .withArtifactId("childA")
-                                .withVersion("2.0.0")
-                                .build())
+                        .withType(DependencyNodeBuilder.NodeType.POM)
+                        .withChildNode(node("childA", "1.0.0").build())
+                        .withChildNode(node("childA", "2.0.0").build())
                         .build());
 
         assertThatCode(rule::execute)

@@ -18,22 +18,20 @@
  */
 package org.apache.maven.enforcer.rules.dependency;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
+import org.apache.maven.api.DependencyScope;
+import org.apache.maven.api.Node;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
+import org.apache.maven.api.services.VersionParser;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.AbstractStandardEnforcerRule;
 import org.apache.maven.enforcer.rules.utils.ArtifactUtils;
-import org.eclipse.aether.graph.DependencyNode;
-
-import static org.apache.maven.artifact.Artifact.SCOPE_PROVIDED;
-import static org.apache.maven.artifact.Artifact.SCOPE_TEST;
 
 /**
  * @author <a href="mailto:rex@e-hoffman.org">Rex Hoffman</a>
@@ -49,7 +47,7 @@ public final class DependencyConvergence extends AbstractStandardEnforcerRule {
 
     private List<String> excludes;
 
-    private List<String> excludedScopes = Arrays.asList(SCOPE_TEST, SCOPE_PROVIDED);
+    private List<String> excludedScopes = Arrays.asList(DependencyScope.TEST.id(), DependencyScope.PROVIDED.id());
 
     // parameters - end
 
@@ -57,16 +55,19 @@ public final class DependencyConvergence extends AbstractStandardEnforcerRule {
 
     private final ResolverUtil resolverUtil;
 
+    private final VersionParser versionParser;
+
     @Inject
-    public DependencyConvergence(ResolverUtil resolverUtil) {
+    public DependencyConvergence(ResolverUtil resolverUtil, VersionParser versionParser) {
         this.resolverUtil = Objects.requireNonNull(resolverUtil);
+        this.versionParser = Objects.requireNonNull(versionParser);
     }
 
     @Override
     public void execute() throws EnforcerRuleException {
 
-        DependencyNode node = resolverUtil.resolveTransitiveDependenciesVerbose(excludedScopes);
-        dependencyVersionMap = new DependencyVersionMap().setUniqueVersions(uniqueVersions);
+        Node node = resolverUtil.resolveTransitiveDependenciesVerbose(excludedScopes);
+        dependencyVersionMap = new DependencyVersionMap(versionParser).setUniqueVersions(uniqueVersions);
         node.accept(dependencyVersionMap);
 
         List<String> errorMsgs =
@@ -78,12 +79,12 @@ public final class DependencyConvergence extends AbstractStandardEnforcerRule {
         }
     }
 
-    private StringBuilder buildTreeString(DependencyNode node) {
+    private StringBuilder buildTreeString(Node node) {
         List<String> loc = new ArrayList<>();
-        DependencyNode currentNode = node;
+        Node currentNode = node;
         while (currentNode != null) {
             // ArtifactUtils.toArtifact(node) adds scope and optional information, if present
-            loc.add(ArtifactUtils.toArtifact(currentNode).toString());
+            loc.add(ArtifactUtils.toString(ArtifactUtils.toArtifact(currentNode)));
             currentNode = dependencyVersionMap.getParent(currentNode);
         }
         Collections.reverse(loc);
@@ -97,25 +98,25 @@ public final class DependencyConvergence extends AbstractStandardEnforcerRule {
         return builder;
     }
 
-    private List<String> getConvergenceErrorMsgs(List<List<DependencyNode>> errors) {
+    private List<String> getConvergenceErrorMsgs(List<List<Node>> errors) {
         List<String> errorMsgs = new ArrayList<>();
-        for (List<DependencyNode> nodeList : errors) {
+        for (List<Node> nodeList : errors) {
             errorMsgs.add(buildConvergenceErrorMsg(nodeList));
         }
         return errorMsgs;
     }
 
-    private String buildConvergenceErrorMsg(List<DependencyNode> nodeList) {
+    private String buildConvergenceErrorMsg(List<Node> nodeList) {
         StringBuilder builder = new StringBuilder();
         builder.append(System.lineSeparator())
                 .append("Dependency convergence error for ")
-                .append(nodeList.get(0).getArtifact().toString())
+                .append(ArtifactUtils.toId(nodeList.get(0).getArtifact()))
                 .append(". Paths to dependency are:")
                 .append(System.lineSeparator());
         if (nodeList.size() > 0) {
             builder.append(buildTreeString(nodeList.get(0)));
         }
-        for (DependencyNode node : nodeList.subList(1, nodeList.size())) {
+        for (Node node : nodeList.subList(1, nodeList.size())) {
             builder.append("and").append(System.lineSeparator()).append(buildTreeString(node));
         }
         return builder.toString();
