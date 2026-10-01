@@ -48,6 +48,7 @@ org.apache.maven.enforcer.rules.dependency.ResolverUtil
 org.apache.maven.enforcer.rules.files.RequireFilesDontExist
 org.apache.maven.enforcer.rules.files.RequireFilesExist
 org.apache.maven.enforcer.rules.files.RequireFilesSize
+org.apache.maven.enforcer.rules.property.BanPropertyPrefix
 org.apache.maven.enforcer.rules.property.RequireEnvironmentVariable
 org.apache.maven.enforcer.rules.property.RequireProperty
 org.apache.maven.enforcer.rules.utils.EnforcerRuleUtils

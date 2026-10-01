@@ -20,10 +20,12 @@ package org.apache.maven.enforcer.rules.property;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Properties;
+import java.util.HashMap;
+import java.util.Map;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.Model;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
-import org.apache.maven.project.MavenProject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -46,17 +48,18 @@ class TestBanPropertyPrefix {
     private static final String OTHER_PREFIX = "other.prefix";
 
     @Mock
-    private MavenProject project;
+    private Project project;
 
     @InjectMocks
     private BanPropertyPrefix rule;
 
-    private Properties properties;
+    private Map<String, String> properties;
 
     @Test
     void shouldFailWhenPropertyWithBannedPrefixExists() {
-        properties.setProperty(BANNED_PREFIX + ".timeout", "5000");
-        when(project.getProperties()).thenReturn(properties);
+        properties.put(BANNED_PREFIX + ".timeout", "5000");
+        when(project.getModel())
+                .thenReturn(Model.newBuilder().properties(properties).build());
         rule.setPrefixes(Collections.singletonList(BANNED_PREFIX));
 
         EnforcerRuleException e = assertThrows(EnforcerRuleException.class, rule::execute);
@@ -68,8 +71,9 @@ class TestBanPropertyPrefix {
 
     @Test
     void shouldPassWhenNoPropertyWithBannedPrefixExists() {
-        properties.setProperty(OTHER_PREFIX + ".value", "x");
-        when(project.getProperties()).thenReturn(properties);
+        properties.put(OTHER_PREFIX + ".value", "x");
+        when(project.getModel())
+                .thenReturn(Model.newBuilder().properties(properties).build());
         rule.setPrefixes(Collections.singletonList(BANNED_PREFIX));
 
         assertDoesNotThrow(rule::execute);
@@ -77,7 +81,8 @@ class TestBanPropertyPrefix {
 
     @Test
     void shouldPassWhenProjectHasNoProperties() {
-        when(project.getProperties()).thenReturn(properties);
+        when(project.getModel())
+                .thenReturn(Model.newBuilder().properties(properties).build());
         rule.setPrefixes(Collections.singletonList(BANNED_PREFIX));
 
         assertDoesNotThrow(rule::execute);
@@ -85,8 +90,9 @@ class TestBanPropertyPrefix {
 
     @Test
     void shouldMatchAnyConfiguredPrefix() {
-        properties.setProperty(OTHER_PREFIX + ".value", "x");
-        when(project.getProperties()).thenReturn(properties);
+        properties.put(OTHER_PREFIX + ".value", "x");
+        when(project.getModel())
+                .thenReturn(Model.newBuilder().properties(properties).build());
         rule.setPrefixes(Arrays.asList(BANNED_PREFIX, OTHER_PREFIX));
 
         EnforcerRuleException e = assertThrows(EnforcerRuleException.class, rule::execute);
@@ -95,10 +101,11 @@ class TestBanPropertyPrefix {
 
     @Test
     void shouldListAllOffendingPropertiesSorted() {
-        properties.setProperty(BANNED_PREFIX + ".two", "2");
-        properties.setProperty("keep.me", "ok");
-        properties.setProperty(BANNED_PREFIX + ".one", "1");
-        when(project.getProperties()).thenReturn(properties);
+        properties.put(BANNED_PREFIX + ".two", "2");
+        properties.put("keep.me", "ok");
+        properties.put(BANNED_PREFIX + ".one", "1");
+        when(project.getModel())
+                .thenReturn(Model.newBuilder().properties(properties).build());
         rule.setPrefixes(Collections.singletonList(BANNED_PREFIX));
 
         EnforcerRuleException e = assertThrows(EnforcerRuleException.class, rule::execute);
@@ -110,8 +117,9 @@ class TestBanPropertyPrefix {
 
     @Test
     void shouldSupportCommaSeparatedEntry() {
-        properties.setProperty(BANNED_PREFIX + ".timeout", "5000");
-        when(project.getProperties()).thenReturn(properties);
+        properties.put(BANNED_PREFIX + ".timeout", "5000");
+        when(project.getModel())
+                .thenReturn(Model.newBuilder().properties(properties).build());
         rule.setPrefixes(Collections.singletonList(BANNED_PREFIX + "," + OTHER_PREFIX));
 
         EnforcerRuleException e = assertThrows(EnforcerRuleException.class, rule::execute);
@@ -120,8 +128,9 @@ class TestBanPropertyPrefix {
 
     @Test
     void shouldIgnoreBlankAndDuplicatePrefixes() {
-        properties.setProperty(OTHER_PREFIX + ".value", "x");
-        when(project.getProperties()).thenReturn(properties);
+        properties.put(OTHER_PREFIX + ".value", "x");
+        when(project.getModel())
+                .thenReturn(Model.newBuilder().properties(properties).build());
         rule.setPrefixes(Arrays.asList(" " + BANNED_PREFIX + " ", " ", " " + BANNED_PREFIX));
 
         assertDoesNotThrow(rule::execute);
@@ -129,8 +138,9 @@ class TestBanPropertyPrefix {
 
     @Test
     void shouldUseCustomMessageWhenConfigured() {
-        properties.setProperty(BANNED_PREFIX + ".timeout", "5000");
-        when(project.getProperties()).thenReturn(properties);
+        properties.put(BANNED_PREFIX + ".timeout", "5000");
+        when(project.getModel())
+                .thenReturn(Model.newBuilder().properties(properties).build());
         rule.setPrefixes(Collections.singletonList(BANNED_PREFIX));
         rule.setMessage("Custom failure message");
 
@@ -150,7 +160,7 @@ class TestBanPropertyPrefix {
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
-        properties = new Properties();
+        properties = new HashMap<>();
         rule = new BanPropertyPrefix(project);
     }
 }
