@@ -18,21 +18,20 @@
  */
 package org.apache.maven.enforcer.rules.property;
 
-import javax.inject.Inject;
-import javax.inject.Named;
-
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
-import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import org.apache.maven.api.Project;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.di.Named;
 import org.apache.maven.enforcer.rule.api.EnforcerRuleException;
 import org.apache.maven.enforcer.rules.AbstractStandardEnforcerRule;
-import org.apache.maven.project.MavenProject;
 
 /**
  * This rule checks that no Maven property starts with any of the configured banned prefixes and fails the build if
@@ -55,10 +54,10 @@ public final class BanPropertyPrefix extends AbstractStandardEnforcerRule {
      */
     private List<String> prefixes;
 
-    private final MavenProject project;
+    private final Project project;
 
     @Inject
-    public BanPropertyPrefix(MavenProject project) {
+    public BanPropertyPrefix(Project project) {
         this.project = Objects.requireNonNull(project);
     }
 
@@ -77,8 +76,8 @@ public final class BanPropertyPrefix extends AbstractStandardEnforcerRule {
             return;
         }
 
-        Properties properties = project.getProperties();
-        Set<String> bannedPropertiesFound = properties.stringPropertyNames().stream()
+        Map<String, String> properties = project.getModel().getProperties();
+        Set<String> bannedPropertiesFound = properties.keySet().stream()
                 .filter(property -> bannedPrefixes.stream().anyMatch(property::startsWith))
                 .collect(Collectors.toCollection(TreeSet::new));
 
